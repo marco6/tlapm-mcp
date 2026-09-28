@@ -3,7 +3,8 @@ package prover
 import (
 	"context"
 	"fmt"
-	"os"
+	"io/fs"
+
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -86,7 +87,7 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 			if r.ProofText == "" {
 				r.ProofText = m[1]
 			}
-			if strings.Contains(m[1], "obligations proved") {
+			if strings.Contains(m[1], "obligation proved") {
 				r.Success = true
 			}
 		}
@@ -104,6 +105,11 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 
 	// Parse total time
 	r.TotalTime = parseTotalTime(output)
+	if r.TotalTime == 0 {
+		if v, ok := r.Timing["total"]; ok {
+			r.TotalTime = v
+		}
+	}
 
 	// Set error code based on success state and output content
 	if !r.Success {
@@ -126,7 +132,8 @@ func moduleName(path string) string {
 	return strings.TrimSuffix(base, ".tla")
 }
 
-var timingRe = regexp.MustCompile(`^(\w+)\s+\|\s+([\d.]+)\s*$`)
+
+var timingRe = regexp.MustCompile(`(\w+)\s+\|\s+([\d.]+)`)
 var totalTimeRe = regexp.MustCompile(`Total\s+time:\s+([\d.]+)\s+s`)
 
 func parseTiming(output string, r *Result) {
@@ -134,7 +141,8 @@ func parseTiming(output string, r *Result) {
 	inTiming := false
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Timing") {
+		clean := strings.TrimPrefix(strings.TrimPrefix(line, "(*"), "(* ")
+		if strings.Contains(line, "operation") || strings.HasPrefix(clean, "Timing") {
 			inTiming = true
 			continue
 		}
@@ -143,7 +151,7 @@ func parseTiming(output string, r *Result) {
 				if v, err := strconv.ParseFloat(m[2], 64); err == nil {
 					r.Timing[m[1]] = v
 				}
-			} else if strings.HasPrefix(line, "---") {
+			} else if strings.Contains(line, "---") {
 				inTiming = false
 			}
 		}
@@ -252,16 +260,16 @@ func raceSolvers(ctx context.Context, args RaceArgs, solvers []string) (RaceResu
 }
 
 // listTheorems parses a TLA+ file for provable targets.
-func listTheorems(ctx context.Context, modulePath string, includeSubproofs bool) (ListResult, error) {
-	if _, err := os.Stat(modulePath); err != nil {
-		if os.IsNotExist(err) {
+func listTheorems(fsys fs.FS, ctx context.Context, modulePath string, includeSubproofs bool) (ListResult, error) {
+	if _, err := fs.Stat(fsys, modulePath); err != nil {
+		if osIsNotExist(err) {
 			return ListResult{}, WrapToolError("list_theorems", ErrModuleNotFound,
 				"module file not found", modulePath)
 		}
 		return ListResult{}, WrapError("list_theorems", ErrIO,
-			"cannot read module file", err)
+			"failed to read module file", err)
 	}
-	content, err := os.ReadFile(modulePath)
+	data, err := fs.ReadFile(fsys, modulePath)
 	if err != nil {
 		return ListResult{}, WrapError("list_theorems", ErrIO,
 			"failed to read module file", err)
@@ -272,20 +280,20 @@ func listTheorems(ctx context.Context, modulePath string, includeSubproofs bool)
 		File:   modulePath,
 	}
 
-	theoremRe := regexp.MustCompile(`^(\s*)(THEOREM|AXIOM|DEFINE)\s+(\w+)\s*(.*)$`)
+	theoremRe := regexp.MustCompile(`^(\s*)(<\d+[a-z]?[0-9]*[a-z]*>\.?\d*[\.\w]*)?\s*(THEOREM|AXIOM|DEFINE)\s+(\w+)\s*(.*)$`)
 	stepRe := regexp.MustCompile(`<(\d+[a-z]?[0-9]*[a-z]*)>`)
 
-	lines := strings.Split(string(content), "\n")
+	lines := strings.Split(string(data), "\n")
 	var currentSubproofs []string
 
 	for i, line := range lines {
 		if m := theoremRe.FindStringSubmatch(line); m != nil {
-			name := m[3]
+			name := m[4]
 
 			target := Target{
 				Name:   name,
 				Line:   i + 1,
-				Kind:   m[2],
+				Kind:   m[3],
 			}
 
 			if includeSubproofs && len(currentSubproofs) > 0 {

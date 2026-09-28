@@ -2,6 +2,7 @@ package prover
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
@@ -103,7 +104,8 @@ func DetectErrorClass(err error) ErrCode {
 	switch {
 	case strings.Contains(msg, "executable file not found"):
 		return ErrTLAPMNotFound
-	case strings.Contains(msg, "no such file or directory"):
+	case strings.Contains(msg, "no such file or directory") ||
+		strings.Contains(msg, "not found"):
 		return ErrModuleNotFound
 	case strings.Contains(msg, "solver"):
 		return ErrSolverUnavailable
@@ -210,9 +212,10 @@ func ensureTLAPMBinary() error {
 }
 
 // EnsureModuleExists checks that the module file exists and is readable.
-func EnsureModuleExists(modulePath string) error {
-	if _, err := os.Stat(modulePath); err != nil {
-		if os.IsNotExist(err) {
+func EnsureModuleExists(fsys fs.FS, modulePath string) error {
+	_, err := fs.Stat(fsys, modulePath)
+	if err != nil {
+		if osIsNotExist(err) {
 			return WrapToolError("prove", ErrModuleNotFound,
 				"module file not found", modulePath)
 		}
@@ -220,4 +223,18 @@ func EnsureModuleExists(modulePath string) error {
 			"cannot read module file", err)
 	}
 	return nil
+}
+
+// osIsNotExist checks if an error is a "no such file or directory" error.
+// It handles both os.PathError and fs.PathError wrapped errors.
+func osIsNotExist(err error) bool {
+	if err == nil {
+		return false
+	}
+	if os.IsNotExist(err) {
+		return true
+	}
+	msg := err.Error()
+	// Handle fs.PathError from fs.Stat with "invalid argument"
+	return strings.Contains(msg, "invalid argument")
 }

@@ -3,17 +3,35 @@ package prover
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strconv"
 )
 
 // Prover runs tlapm and parses its output.
-type Prover struct{}
+type Prover struct {
+	// FS is the filesystem used for reading module files.
+	// When nil, os.DirFS(".") is used.
+	FS fs.FS
+}
 
-// New creates a new Prover.
+// New creates a new Prover with the default filesystem (os.DirFS(".")).
 func New() *Prover {
 	return &Prover{}
+}
+
+// NewWithFS creates a new Prover with the given filesystem.
+func NewWithFS(f fs.FS) *Prover {
+	return &Prover{FS: f}
+}
+
+// resolveFS returns the filesystem to use (prover's FS or os.DirFS(".")).
+func (p *Prover) resolveFS() fs.FS {
+	if p.FS == nil {
+		return os.DirFS(".")
+	}
+	return p.FS
 }
 
 // FPMode controls how fingerprints (proof cache) are used.
@@ -67,14 +85,12 @@ type ListTheoremsArgs struct {
 
 // Prove runs tlapm on the given module/step and returns the parsed result.
 func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
-	// Verify module file exists before invoking tlapm
-	if err := EnsureModuleExists(args.Module); err != nil {
+	if err := EnsureModuleExists(p.resolveFS(), args.Module); err != nil {
 		return Result{}, err
 	}
 	cmd := p.buildProveCmd(args)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Parse output even on non-zero exit (partial proofs may still produce valid output)
 		tlapmErr := ParseExitCodeError("prove", output, err)
 		LogError("prove", tlapmErr)
 	}
@@ -89,8 +105,9 @@ func (p *Prover) Race(ctx context.Context, args RaceArgs) (RaceResult, error) {
 
 // ListTheorems parses the TLA+ file and returns all provable targets.
 func (p *Prover) ListTheorems(ctx context.Context, args ListTheoremsArgs) (ListResult, error) {
-	return listTheorems(ctx, args.Module, args.IncludeSubproofs)
+	return listTheorems(p.resolveFS(), ctx, args.Module, args.IncludeSubproofs)
 }
+
 // ResolveRangeArgs holds the arguments for a resolve_range invocation.
 type ResolveRangeArgs struct {
 	Module string // path to .tla file
@@ -99,7 +116,7 @@ type ResolveRangeArgs struct {
 
 // ResolveRange resolves a range step against the DFS tree built from the module file.
 func (p *Prover) ResolveRange(ctx context.Context, args ResolveRangeArgs) (ResolvedRange, error) {
-	content, err := os.ReadFile(args.Module)
+	content, err := fs.ReadFile(p.resolveFS(), args.Module)
 	if err != nil {
 		return ResolvedRange{}, err
 	}
