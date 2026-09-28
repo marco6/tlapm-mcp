@@ -21,7 +21,7 @@ type Result struct {
 	Timing             map[string]float64 `json:"timing"`
 	Obligations        []Obligation      `json:"obligations,omitempty"`
 	ProofText          string            `json:"proof_text"`
-	FingerprintsUsed   bool              `json:"fingerprints_used"`
+	FingerprintsUsed string             `json:"fingerprints_used"`
 }
 
 // Obligation is a single proof obligation with its status.
@@ -69,7 +69,7 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 		Module:           moduleName(args.Module),
 		Step:             args.Step,
 		Solver:           args.Solver,
-		FingerprintsUsed: args.UseFP,
+		FingerprintsUsed: args.FPModes.String(),
 		Timing:           make(map[string]float64),
 	}
 
@@ -179,10 +179,13 @@ func raceSolvers(ctx context.Context, args RaceArgs, solvers []string) (RaceResu
 			if args.Step != "" {
 				cmd.Args = append(cmd.Args, args.Step)
 			}
-			if !args.UseFP {
+			switch args.FPModes {
+			case FPNo:
 				cmd.Args = append(cmd.Args, "--nofp")
-			} else if args.FPCheck {
+			case FPCheck:
 				cmd.Args = append(cmd.Args, "--safefp")
+			case FPDefault:
+				// default: use cached (no extra flag needed)
 			}
 			out, err := cmd.CombinedOutput()
 			r.TotalTimeSeconds = time.Since(start).Seconds()

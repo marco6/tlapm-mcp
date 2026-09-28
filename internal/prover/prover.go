@@ -15,23 +15,47 @@ func New() *Prover {
 	return &Prover{}
 }
 
+// FPMode controls how fingerprints (proof cache) are used.
+// - FPDefault (0): use cached results (equivalent to --usefp).
+// - FPNo (1): ignore existing fingerprints (equivalent to --nofp).
+// - FPCheck (2): load fingerprints but validate tlapm/zenon/Isabelle versions (equivalent to --safefp).
+type FPMode int
+
+const (
+	FPDefault FPMode = iota
+	FPNo
+	FPCheck
+)
+
+// String returns the human-readable fingerprint mode.
+func (m FPMode) String() string {
+	switch m {
+	case FPDefault:
+		return "use"
+	case FPNo:
+		return "no"
+	case FPCheck:
+		return "check"
+	default:
+		return "use"
+	}
+}
+
 // ProveArgs holds the arguments for a prove invocation.
 type ProveArgs struct {
-	Module   string // path to .tla file
-	Step     string // theorem/subproof selector
-	Solver   string // solver name (empty = tlapm default)
-	UseFP    bool   // use fingerprints
-	Threads  int    // worker threads
-	FPCheck  bool   // --safefp version check
+	Module   string    // path to .tla file
+	Step     string    // theorem/subproof selector
+	Solver   string    // solver name (empty = tlapm default)
+	FPModes  FPMode    // fingerprint mode (default: use cached)
+	Threads  int       // worker threads
 }
 
 // RaceArgs holds the arguments for a race invocation.
 type RaceArgs struct {
-	Module  string
-	Step    string
-	UseFP   bool
-	FPCheck bool
-	Threads int // max parallel invocations
+	Module  string   // path to .tla file
+	Step    string   // theorem/subproof selector
+	FPModes FPMode   // fingerprint mode (default: use cached)
+	Threads int      // max parallel invocations
 }
 
 // ListTheoremsArgs holds the arguments for list_theorems.
@@ -89,10 +113,13 @@ func (p *Prover) buildProveCmd(args ProveArgs) *exec.Cmd {
 	if args.Threads > 1 {
 		cmdArgs = append(cmdArgs, "--threads", string(rune('0'+args.Threads)))
 	}
-	if !args.UseFP {
+	switch args.FPModes {
+	case FPNo:
 		cmdArgs = append(cmdArgs, "--nofp")
-	} else if args.FPCheck {
+	case FPCheck:
 		cmdArgs = append(cmdArgs, "--safefp")
+	case FPDefault:
+		// default: use cached (no extra flag needed)
 	}
 	if args.Step != "" {
 		cmdArgs = append(cmdArgs, args.Step)
