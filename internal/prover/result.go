@@ -2,6 +2,7 @@ package prover
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"regexp"
@@ -21,7 +22,8 @@ type Result struct {
 	Timing             map[string]float64 `json:"timing"`
 	Obligations        []Obligation      `json:"obligations,omitempty"`
 	ProofText          string            `json:"proof_text"`
-	FingerprintsUsed string             `json:"fingerprints_used"`
+	FingerprintsUsed   string            `json:"fingerprints_used"`
+	ErrorCode          string            `json:"error_code,omitempty"` // structured error code from tlapm
 }
 
 // Obligation is a single proof obligation with its status.
@@ -89,13 +91,11 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 			}
 		}
 		if m := errorRe.FindStringSubmatch(line); m != nil {
-			if !r.Success {
-				r.Obligations = append(r.Obligations, Obligation{
-					Text:   m[1],
-					Status: "failed",
-					Error:  m[1],
-				})
-			}
+			r.Obligations = append(r.Obligations, Obligation{
+				Text:   m[1],
+				Status: "failed",
+				Error:  m[1],
+			})
 		}
 	}
 
@@ -104,6 +104,15 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 
 	// Parse total time
 	r.TotalTime = parseTotalTime(output)
+
+	// Set error code based on success state and output content
+	if !r.Success {
+		if strings.Contains(output, "corrupt") || strings.Contains(output, "invalid fingerprint") {
+			r.ErrorCode = string(ErrFingerprintCorrupted)
+		} else {
+			r.ErrorCode = string(ErrExitCode)
+		}
+	}
 
 	return r, nil
 }
@@ -193,6 +202,14 @@ func raceSolvers(ctx context.Context, args RaceArgs, solvers []string) (RaceResu
 			if err != nil {
 				r.Success = false
 				r.Error = strings.TrimSpace(string(out))
+				// Distinguish solver-unavailable from proof-failure
+				if strings.Contains(err.Error(), "executable file not found") {
+					r.Error = fmt.Sprintf("solver %s not available: %v", s, err)
+					r.ObligationsFailed = -1 // sentinel: solver unavailable
+				} else if strings.Contains(strings.ToLower(r.Error), "corrupt") ||
+					strings.Contains(strings.ToLower(r.Error), "invalid fingerprint") {
+					r.Error = fmt.Sprintf("corrupted fingerprint for solver %s", s)
+				}
 			} else {
 				r.Success = true
 			}
@@ -236,9 +253,18 @@ func raceSolvers(ctx context.Context, args RaceArgs, solvers []string) (RaceResu
 
 // listTheorems parses a TLA+ file for provable targets.
 func listTheorems(ctx context.Context, modulePath string, includeSubproofs bool) (ListResult, error) {
+	if _, err := os.Stat(modulePath); err != nil {
+		if os.IsNotExist(err) {
+			return ListResult{}, WrapToolError("list_theorems", ErrModuleNotFound,
+				"module file not found", modulePath)
+		}
+		return ListResult{}, WrapError("list_theorems", ErrIO,
+			"cannot read module file", err)
+	}
 	content, err := os.ReadFile(modulePath)
 	if err != nil {
-		return ListResult{}, err
+		return ListResult{}, WrapError("list_theorems", ErrIO,
+			"failed to read module file", err)
 	}
 
 	result := ListResult{

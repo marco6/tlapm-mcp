@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strconv"
 )
 
 // Prover runs tlapm and parses its output.
@@ -66,10 +67,16 @@ type ListTheoremsArgs struct {
 
 // Prove runs tlapm on the given module/step and returns the parsed result.
 func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
+	// Verify module file exists before invoking tlapm
+	if err := EnsureModuleExists(args.Module); err != nil {
+		return Result{}, err
+	}
 	cmd := p.buildProveCmd(args)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		// Still parse output even on non-zero exit (partial proofs)
+		// Parse output even on non-zero exit (partial proofs may still produce valid output)
+		tlapmErr := ParseExitCodeError("prove", output, err)
+		LogError("prove", tlapmErr)
 	}
 	return parseResult(string(output), args)
 }
@@ -111,7 +118,7 @@ func (p *Prover) buildProveCmd(args ProveArgs) *exec.Cmd {
 		cmdArgs = append(cmdArgs, "--solver", args.Solver)
 	}
 	if args.Threads > 1 {
-		cmdArgs = append(cmdArgs, "--threads", string(rune('0'+args.Threads)))
+		cmdArgs = append(cmdArgs, "--threads", strconv.Itoa(args.Threads))
 	}
 	switch args.FPModes {
 	case FPNo:
