@@ -267,3 +267,7 @@ When a proof fails, the `obligations` array contains the text of each unproven o
     "steps": ["<1>1", "<1>2", "<1>3"],
     "step_count": 3 }
 ```
+
+---
+
+*This project was developed with AI assistance using agentic workflows and a structured knowledge base (`.kb/agents.md`, `AGENTS.md`).*
