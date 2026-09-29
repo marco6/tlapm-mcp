@@ -239,23 +239,31 @@ When a proof fails, the `obligations` array contains the text of each unproven o
 ## Example interactions
 
 ```
-> Prove `Correctness` in `Spec.tla` with solver `zenon`.
+> Prove `EvenPlusEvenIsEven` in `NaturalNumbers.tla`.
 
-< {"module": "Spec.tla", "step": "Correctness", "solver": "zenon", "use_fingerprints": true}
-< 
-< { "success": true, "step": "Correctness", "solver": "zenon", "total_time_seconds": 0.152,
-<   "proof_text": "All 37 obligations proved." }
+< {"module": "NaturalNumbers.tla", "step": "EvenPlusEvenIsEven", "solver": "z3", "use_fingerprints": true}
 
-> Prove `Correctness/<1>/<2>` in `Spec.tla` without cache.
+< { "success": true, "step": "EvenPlusEvenIsEven", "solver": "z3", "total_time_seconds": 0.019,
+    "proof_text": "All 1 obligation proved." }
 
-< {"module": "Spec.tla", "step": "Correctness/<1>/<2>", "use_fingerprints": false}
-<
-< { "success": true, "step": "Correctness/<1>/<2>", "solver": "smt", "total_time_seconds": 0.034 }
+> Prove `EvenPlusEvenIsEven` without cache.
 
-> Race all provers on `Spec.tla`.
+< {"module": "NaturalNumbers.tla", "step": "EvenPlusEvenIsEven", "use_fingerprints": false}
 
-< {"module": "Spec.tla", "use_fingerprints": true}
-<
+< { "success": true, "step": "EvenPlusEvenIsEven", "solver": "smt", "total_time_seconds": 0.018 }
+
+> Race all provers on `arithmetic.tla`.
+
+< {"module": "arithmetic.tla", "use_fingerprints": true}
+
 < { "fastest": { "solver": "smt", "success": true, "time": 0.087 },
-<   "results": [ ... ] }
+    "results": [ ... ] }
+
+> Resolve range `<1>..<3>` in `proof_more_than_one_leader.tla`.
+
+< {"module": "proof_more_than_one_leader.tla", "step": "MoreThanOneLeaderInvariant/<1>..<3>"}
+
+< { "resolved_step": "MoreThanOneLeaderInvariant/<1>..<3>",
+    "steps": ["<1>1", "<1>2", "<1>3"],
+    "step_count": 3 }
 ```

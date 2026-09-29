@@ -14,43 +14,50 @@
 
 The server is a thin wrapper around the `tlapm` binary. It:
 
-1. **Parses MCP requests** for `prove`, `race`, and `list_theorems`.
+1. **Parses MCP requests** for `prove`, `race`, `list_theorems`, and `resolve_range`.
 2. **Spawns `tlapm`** with the appropriate flags (`--solver`, `--timing`, `--nofp`, `--line`, etc.).
 3. **Parses tlapm's structured output** (console text + fingerprint files).
 4. **Returns typed JSON** with success/failure, timing breakdowns, and obligation details.
 
 ## Adding a new tool
 
-1. Add a handler in the tools registry.
-2. Define its `Input` and `Output` types.
-3. Wire it in the MCP protocol loop.
+1. Register the tool in `cmd/tlapm-mcp/main.go` with a `Tool` definition (name, description, `InputSchema`) and a handler function `func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error)`.
+2. Add argument parsing in the same file (`parseXxxArgs`).
+3. Wire it via `server.AddTool()`.
 
 ## Adding solver support
 
-New backends are detected automatically by tlapm's `--config` output. To add a solver:
+New backends are detected automatically by `raceSolvers()` in `internal/prover/result.go`, which reads tlapm's `--config` output. To add a solver:
 
 1. Ensure the binary is on `$PATH`.
 2. Run `tlapm --method help` to confirm it's listed.
-3. Add it to the `available_solvers` set in the server.
+3. The server will auto-detect it; no code change needed.
 
 ## Testing
 
-### Manual testing
+### Unit tests
 
 ```sh
-# Run the server instdio mode
-python -m tlapm_mcp
+# All tests
+go test ./...
 
-# Or with a custom tlapm path
-TLAPM_PATH=/path/to/tlapm python -m tlapm_mcp
+# Step parsing tests
+go test ./internal/prover/ -run TestParseStep -v
+
+# Integration tests (spawns tlapm)
+go test ./internal/prover/ -run TestIntegration -v -count=1
 ```
 
-### Expected outputs
+Integration tests use `go:embed` to load TLA+ files from `internal/prover/testdata/`. The prover uses `fs.FS` for filesystem abstraction, so production code uses `os.DirFS(".")` directly while tests embed files.
 
-- `prove` on a passing theorem → `{"success": true, "solver": "...", "total_time_seconds": 0.X}`
-- `prove` on a failing theorem → `{"success": false, "obligations": [{...}]}`
-- `race` → sorted results with `fastest` field
-- `list_theorems` → full target list with subproof paths
+### Example modules
+
+| File | Source | Description |
+|------|--------|-------------|
+| `examples/NaturalNumbers.tla` | CommunityModules (MIT) | Standalone arithmetic module (Even/Odd theorems) |
+| `internal/prover/testdata/arithmetic.tla` | CommunityModules (MIT) | Derived from NaturalNumbers; includes EvenPlusOddIsEven (failing) |
+| `internal/prover/testdata/failing.tla` | CommunityModules (MIT) | Factorial theorems; FactorialGrows fails |
+| `examples/proof_more_than_one_leader.tla` | raft spec | Lemma + theorem with nested subproof steps |
 
 
 ### Testing subproofs
