@@ -34,6 +34,8 @@ tlapm-mcp exposes three core tools — `prove`, `race`, and `list_theorems` — 
 # Documents
 
 - `.kb/agents.md` - General rules for the knowledge base reading and writing.
+- `.kb/ci.md` - CI workflow configuration and testing pipeline.
+
 - `cmd/AGENTS.md` - CLI entry points and server bootstrap.
 - `internal/AGENTS.md` - Core internal packages overview.
 - `internal/server/AGENTS.md` - MCP server setup.
