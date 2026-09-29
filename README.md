@@ -268,6 +268,79 @@ When a proof fails, the `obligations` array contains the text of each unproven o
     "step_count": 3 }
 ```
 
----
+## Build & Editor Setup
 
-*This project was developed with AI assistance using agentic workflows and a structured knowledge base (`.kb/agents.md`, `AGENTS.md`).*
+### Building
+
+```bash
+# Ensure Go 1.24+ is available
+go version
+
+# Build the binary (outputs to ./bin/tlapm-mcp)
+go build -o bin/tlapm-mcp ./cmd/tlapm-mcp/
+
+# Or run directly without building
+go run ./cmd/tlapm-mcp/
+```
+
+The binary communicates over MCP stdio as a long-lived process. **Solver selection** and **fingerprinting** are per-command options inside tool calls — the agent decides which solver to use and whether to cache, rather than fixing them as global CLI flags.
+
+### Opencode
+
+Add `tlapm-mcp` as an MCP server in your Opencode configuration:
+
+```jsonc
+// .opencode/config.jsonc (or your Opencode config file)
+{
+  "mcpServers": {
+    "tlapm": {
+      "command": "go",
+      "args": ["run", "./cmd/tlapm-mcp/"],
+      "cwd": "/path/to/tlapm-mcp"
+    }
+  }
+}
+```
+
+Or with the compiled binary:
+
+```jsonc
+{
+  "mcpServers": {
+    "tlapm": {
+      "command": "/path/to/tlapm-mcp/bin/tlapm-mcp"
+    }
+  }
+}
+```
+
+The agent passes `solver` and `use_fingerprints` inside each `prove` / `race` tool call:
+
+```jsonc
+// Example prove call — agent picks z3, no cache
+{ "module": "Spec.tla", "solver": "z3", "use_fingerprints": false }
+
+// Example race — agent picks default solver, uses cache
+{ "module": "Spec.tla", "use_fingerprints": true }
+```
+
+### OMP (Oh My Pi)
+
+Connect via OMP's MCP server config:
+
+```jsonc
+// ~/.omp/config.jsonc (or via `omp init`)
+{
+  "mcp": {
+    "servers": {
+      "tlapm": {
+        "command": "go",
+        "args": ["run", "./cmd/tlapm-mcp/"],
+        "cwd": "/path/to/tlapm-mcp"
+      }
+    }
+  }
+}
+```
+
+**Tip:** Run `tlapm --config` to list available solver binaries (z3, zenon, spass, etc.). The agent reads this auto-detection and picks the right solver per proof obligation.
