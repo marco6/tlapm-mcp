@@ -4,54 +4,54 @@ An MCP server that wraps the [TLA⁺ Proof Manager (tlapm)](https://github.com/t
 
 ## Quick start
 
-The model can ask to prove a theorem with simple, natural-language-friendly instructions:
+Prove a specific source line, or an inclusive line range, in a TLA+ module:
 
-- **"Prove `Correctness`"** — runs the default prover on the theorem at the top level.
-- **"Prove `Correctness/<1>`"** — proves only step `<1>` within theorem `Correctness`.
-- **"Prove `Correctness/<1>/<2>`"** — proves a nested subproof.
-- **"Prove with solver `z3`"** — uses Z3 instead of the default.
-- **"Prove without cache"** — disables fingerprint/caching.
-- **"Race all provers"** — fires every backend in parallel and returns the fastest success.
+- **Line 28** — runs `tlapm --line 28`.
+- **Lines 28–34** — runs `tlapm --toolbox 28 34`.
+- **Prove with solver `z3`** — uses Z3 instead of the default.
+- **Prove without cache** — disables fingerprint/caching.
+- **Race all provers** — fires every backend in parallel and returns the fastest success.
+
+The MCP does not parse TLA+ source or resolve theorem paths. It passes the requested line or range directly to `tlapm` and parses only the tool output.
 
 ## MCP Tools
 
 ### `prove`
 
-Prove a specific theorem or subproof step.
+Prove one source line or an inclusive source line range. Provide exactly one of `line` or `range`.
 
 ```jsonc
 {
-  "module": "/path/to/Spec.tla",   // required: TLA+ module file
-  "step": "Correctness/<1>/<2>",  // optional: theorem + subproof path (e.g. "<1>/<2>", "<1>..<3>")
-  "solver": "z3",                  // optional: specific prover
-  "use_fingerprints": true,        // optional: use cached results (default)
-  "threads": 1                     // optional: parallel threads per prover
+  "module": "/path/to/Spec.tla",       // required: TLA+ module file
+  "line": 28,                           // one-based source line; alternatively use range
+  "solver": "z3",                      // optional: specific prover
+  "use_fingerprints": true,             // optional: cache mode (default)
+  "threads": 1                          // optional: worker threads per prover
 }
 ```
+
+For a range, replace `line` with an inclusive `range` object:
+
+```jsonc
+{
+  "module": "/path/to/Spec.tla",
+  "range": { "start": 28, "end": 34 }
+}
+```
+
+Single lines use `--line N`; ranges use `--toolbox START END`.
 
 **Returns:**
 
 ```jsonc
 {
-  "success": true,                 // did the proof succeed?
-  "module": "Spec",                // module name
-  "step": "Correctness/<1>/<2>",  // what was proved
-  "solver": "z3",                  // which solver was used
-  "total_time_seconds": 0.234,    // wall-clock time
-  "timing": {                      // breakdown by operation
-    "parsing": 0.012,
-    "analysis": 0.003,
-    "generation": 0.0,
-    "simplification": 0.001,
-    "formatting": 0.0,
-    "interaction": 0.210,         // main proof work
-    "checking": 0.0,
-    "fp_loading": 0.005,
-    "fp_saving": 0.0,
-    "fp_compute": 0.0,
-    "other": 0.003
-  },
-  "obligations": [                 // if success is false, details
+  "success": true,
+  "module": "Spec",
+  "line": 28,                         // or "range": { "start": 28, "end": 34 }
+  "solver": "z3",
+  "total_time_seconds": 0.234,
+  "timing": { "interaction": 0.210 },
+  "obligations": [
     {
       "line": 56,
       "text": "ASSUME Number == Nat \\ {0}, NEW CONSTANT M, NEW CONSTANT N,",
@@ -60,22 +60,24 @@ Prove a specific theorem or subproof step.
     }
   ],
   "proof_text": "[INFO]: All 37 obligations proved.",
-  "fingerprints_used": true
+  "fingerprints_used": "use"
 }
 ```
 
 ### `race`
 
-Race all available provers on a module/theorem and return the fastest successful prover. This is about finding the winner, not proving everything — the server launches each solver in parallel, each against the same target, and reports every result sorted by time.
+Race all available provers on one source line or an inclusive line range. Provide exactly one of `line` or `range`. The server launches each solver in parallel, runs the same target in each, and reports every result sorted by time.
 
 ```jsonc
 {
   "module": "/path/to/Spec.tla",
-  "step": "Correctness",           // optional: target a specific theorem (whole theorem or subproof)
+  "line": 28,                           // alternatively: "range": { "start": 28, "end": 34 }
   "use_fingerprints": true,
-  "threads": 2                     // max parallel prover invocations
+  "threads": 2                          // max parallel prover invocations
 }
 ```
+
+`line` is passed as `--line N`; `range` is passed as `--toolbox START END`.
 
 **Returns:**
 
@@ -89,118 +91,24 @@ Race all available provers on a module/theorem and return the fastest successful
   "results": [
     { "solver": "smt",   "success": true,  "time": 0.087, "obligations_failed": 0 },
     { "solver": "zenon", "success": true,  "time": 0.152, "obligations_failed": 0 },
-    { "solver": "z3",    "success": false, "time": 1.203, "obligations_failed": 5, "error": "Zenon error: exhausted search space" },
-    { "solver": "auto",  "success": true,  "time": 0.910, "obligations_failed": 0 },
-    { "solver": "blast", "success": true,  "time": 1.102, "obligations_failed": 0 }
+    { "solver": "z3",    "success": false, "time": 1.203, "obligations_failed": 5, "error": "Zenon error: exhausted search space" }
   ]
 }
 ```
 
-### `list_theorems`
+## Line and range targeting
 
-List all provable targets (theorems, axioms, definitions) in a module, including subproof structure.
-
-```jsonc
-{
-  "module": "/path/to/Spec.tla",
-  "include_subproofs": true       // include nested step info
-}
-```
-
-**Returns:**
+Targets are one-based source line numbers, not theorem names or proof-step paths. Supply exactly one target:
 
 ```jsonc
-{
-  "module": "Euclid",
-  "file": "/path/to/Spec.tla",
-  "targets": [
-    {
-      "name": "InitProperty",
-      "line": 35,
-      "kind": "THEOREM",
-      "has_subproofs": true,
-      "subproof_path": "InitProperty/<1>/<2>"
-    },
-    {
-      "name": "NextProperty",
-      "line": 42,
-      "kind": "THEOREM",
-      "has_subproofs": true,
-      "subproof_path": "NextProperty/<1>/<2>/<1>a/<2>1"
-    },
-    {
-      "name": "Correctness",
-      "line": 64,
-      "kind": "THEOREM",
-      "has_subproofs": true,
-      "subproof_path": "Correctness/<1>.<2>.<3>"
-    },
-    {
-      "name": "GCDProperty1",
-      "line": 38,
-      "kind": "AXIOM",
-      "has_subproofs": false
-    }
-  ]
-}
+{ "module": "Spec.tla", "line": 35 }
+{ "module": "Spec.tla", "range": { "start": 35, "end": 42 } }
 ```
 
+- `line` selects one source line and becomes `tlapm --line N`.
+- `range` selects inclusive start/end lines and becomes `tlapm --toolbox START END`.
 
-## Step / Subproof Notation
-
-TLA+ proofs are hierarchical. The server supports two ways to target subproofs:
-
-### Nested path (exact)
-
-```
-TheoremName
-TheoremName/<1>              — step 1 within the theorem
-TheoremName/<1>/<2>          — step 2 inside step 1
-TheoremName/<1>/<2>/<3>      — deeper nesting
-TheoremName/<*>              — all direct subproofs of TheoremName
-```
-
-### Range (from…to)
-
-```
-TheoremName/<1>..<3>         — prove steps 1 through 3 (in DFS traversal order)
-TheoremName/<2>subfact..<3>  — from <2>subfact to <3>, including everything between
-```
-
-The `<from>..<to>` notation works as a **sequential range** through the proof tree. You specify a start and end step, and the server proves everything between them in DFS order. This is more granular than a simple range — you can pin exact steps rather than just numbers.
-
-```
-<1>factA.
-  <2>subfact.
-    <3>subsubfact1.
-  <2>anothersubfact.
-    <3>anothersubsubfact
-<1>factb.
-  <3>not_required_to_be_2
-
-Correctness/<1>..<3>         → all steps from the first <1> to the last <3>
-Correctness/<1>/<2>..<3>    → from the first <2> inside <1> to the last <3>
-Correctness/<1>/<2>..<3>    → includes everything in between (subfact, subsubfact1, anothersubfact, anothersubsubfact)
-```
-
-Notably, `<3>` doesn't need to be a child of `<2>` — it can be a child of `<1>` or anywhere between the start and end.
-
-### Line number targeting
-
-```
-line:35
-```
-
-### Step notation summary
-
-| Pattern | Meaning |
-|---------|---------|
-| `Correctness` | Whole theorem |
-| `Correctness/<1>` | Step `<1>` |
-| `Correctness/<1>/<2>` | Nested step (2 inside 1) |
-| `Correctness/<*>` | All direct subproofs |
-| `Correctness/<1>..<3>` | Range: from `<1>` to `<3>` (DFS order) |
-| `Correctness/<1>/<2>..<3>` | Range: from `<2>` to `<3>` inside `<1>` |
+The MCP does not inspect module contents; `tlapm` interprets the source and target.
 
 ## Solver Reference
 | Solver | Description |
@@ -233,39 +141,29 @@ When a proof fails, the `obligations` array contains the text of each unproven o
 
 - A missing definition (`USE DEF X`)
 - A solver timeout / search space exhaustion
-- A malformed proof step
+- An incorrect source line or range target
 - A missing assumption
 
 ## Example interactions
 
 ```
-> Prove `EvenPlusEvenIsEven` in `NaturalNumbers.tla`.
+> Prove the theorem beginning on line 28 in `hard_proofs.tla`.
 
-< {"module": "NaturalNumbers.tla", "step": "EvenPlusEvenIsEven", "solver": "z3", "use_fingerprints": true}
+< {"module": "hard_proofs.tla", "line": 28, "solver": "z3", "use_fingerprints": true}
 
-< { "success": true, "step": "EvenPlusEvenIsEven", "solver": "z3", "total_time_seconds": 0.019,
-    "proof_text": "All 1 obligation proved." }
+< {"success": true, "module": "hard_proofs", "line": 28, "solver": "z3", "total_time_seconds": 0.019}
 
-> Prove `EvenPlusEvenIsEven` without cache.
+> Prove source lines 28 through 34 without cache.
 
-< {"module": "NaturalNumbers.tla", "step": "EvenPlusEvenIsEven", "use_fingerprints": false}
+< {"module": "hard_proofs.tla", "range": {"start": 28, "end": 34}, "use_fingerprints": false}
 
-< { "success": true, "step": "EvenPlusEvenIsEven", "solver": "smt", "total_time_seconds": 0.018 }
+< {"success": true, "module": "hard_proofs", "range": {"start": 28, "end": 34}, "solver": "smt", "total_time_seconds": 0.018}
 
-> Race all provers on `arithmetic.tla`.
+> Race all provers on line 28 of `hard_proofs.tla`.
 
-< {"module": "arithmetic.tla", "use_fingerprints": true}
+< {"module": "hard_proofs.tla", "line": 28, "use_fingerprints": true}
 
-< { "fastest": { "solver": "smt", "success": true, "time": 0.087 },
-    "results": [ ... ] }
-
-> Resolve range `<1>..<3>` in `proof_more_than_one_leader.tla`.
-
-< {"module": "proof_more_than_one_leader.tla", "step": "MoreThanOneLeaderInvariant/<1>..<3>"}
-
-< { "resolved_step": "MoreThanOneLeaderInvariant/<1>..<3>",
-    "steps": ["<1>1", "<1>2", "<1>3"],
-    "step_count": 3 }
+< {"fastest": {"solver": "smt", "success": true, "time": 0.087}, "results": [ ... ]}
 ```
 
 ## Build & Editor Setup
@@ -283,7 +181,7 @@ go build -o bin/tlapm-mcp ./cmd/tlapm-mcp/
 go run ./cmd/tlapm-mcp/
 ```
 
-The binary communicates over MCP stdio as a long-lived process. **Solver selection** and **fingerprinting** are per-command options inside tool calls — the agent decides which solver to use and whether to cache, rather than fixing them as global CLI flags.
+The binary communicates over MCP stdio as a long-lived process. Every `prove` and `race` call requires exactly one of `line` or inclusive `range`; solver selection and fingerprinting remain per-command options.
 
 ### Opencode
 
@@ -314,14 +212,14 @@ Or with the compiled binary:
 }
 ```
 
-The agent passes `solver` and `use_fingerprints` inside each `prove` / `race` tool call:
+The caller provides exactly one of `line` or `range` in each `prove` / `race` tool call:
 
 ```jsonc
-// Example prove call — agent picks z3, no cache
-{ "module": "Spec.tla", "solver": "z3", "use_fingerprints": false }
+// One line -> tlapm --line N
+{ "module": "Spec.tla", "line": 35, "solver": "z3", "use_fingerprints": false }
 
-// Example race — agent picks default solver, uses cache
-{ "module": "Spec.tla", "use_fingerprints": true }
+// Inclusive range -> tlapm --toolbox START END
+{ "module": "Spec.tla", "range": { "start": 35, "end": 42 } }
 ```
 
 ### OMP (Oh My Pi)

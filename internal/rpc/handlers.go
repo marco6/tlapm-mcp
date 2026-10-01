@@ -4,6 +4,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -16,35 +17,32 @@ import (
 
 // ProveTool returns the MCP tool definition for prove.
 func ProveTool() *mcp.Tool {
+	properties := targetProperties()
+	properties["module"] = map[string]any{
+		"type":        "string",
+		"description": "Path to the TLA+ module file.",
+	}
+	properties["solver"] = map[string]any{
+		"type":        "string",
+		"description": "Solver to use (e.g. z3, smt, zenon).",
+	}
+	properties["use_fingerprints"] = map[string]any{
+		"type":        "union",
+		"types":       []any{"boolean", "string"},
+		"description": "Fingerprint mode: true (use cache), false (no cache), or \"check\" (validate versions).",
+	}
+	properties["threads"] = map[string]any{
+		"type":        "integer",
+		"description": "Number of worker threads.",
+	}
 	return &mcp.Tool{
 		Name:        "prove",
-		Description: "Prove a specific theorem or subproof step in a TLA+ module.",
+		Description: "Prove one source line or an inclusive line range in a TLA+ module.",
 		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"module": map[string]any{
-					"type":        "string",
-					"description": "Path to the TLA+ module file.",
-				},
-				"step": map[string]any{
-					"type":        "string",
-					"description": "Theorem or subproof path.",
-				},
-				"solver": map[string]any{
-					"type":        "string",
-					"description": "Solver to use (e.g. z3, smt, zenon).",
-				},
-				"use_fingerprints": map[string]any{
-					"type":          "union",
-					"types":         []any{"boolean", "string"},
-					"description":   "Fingerprint mode: true (use cache), false (no cache), or \"check\" (validate versions).",
-				},
-				"threads": map[string]any{
-					"type":        "integer",
-					"description": "Number of worker threads.",
-				},
-			},
-			"required": []any{"module"},
+			"type":       "object",
+			"properties": properties,
+			"required":   []any{"module"},
+			"oneOf":      targetAlternatives(),
 		},
 	}
 }
@@ -87,20 +85,19 @@ func ProveHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolR
 
 // parseProveArgs extracts ProveArgs from tool call arguments.
 func parseProveArgs(args map[string]any) (prover.ProveArgs, error) {
-	pa := prover.ProveArgs{FPModes: prover.FPDefault}
+	module, ok := args["module"].(string)
+	if !ok || module == "" {
+		return prover.ProveArgs{}, fmt.Errorf("module is required")
+	}
+	target, err := parseLineTarget(args)
+	if err != nil {
+		return prover.ProveArgs{}, err
+	}
+	pa := prover.ProveArgs{Module: module, Target: target, FPModes: prover.FPDefault}
 
-	if v, ok := args["module"].(string); ok {
-		pa.Module = v
-	} else {
-		return pa, nil
-	}
-	if v, ok := args["step"].(string); ok {
-		pa.Step = v
-	}
 	if v, ok := args["solver"].(string); ok {
 		pa.Solver = v
 	}
-	// Handle use_fingerprints as boolean or string ("check")
 	if v, ok := args["use_fingerprints"].(bool); ok {
 		if !v {
 			pa.FPModes = prover.FPNo
@@ -127,31 +124,28 @@ func parseProveArgs(args map[string]any) (prover.ProveArgs, error) {
 
 // RaceTool returns the MCP tool definition for race.
 func RaceTool() *mcp.Tool {
+	properties := targetProperties()
+	properties["module"] = map[string]any{
+		"type":        "string",
+		"description": "Path to the TLA+ module file.",
+	}
+	properties["use_fingerprints"] = map[string]any{
+		"type":        "union",
+		"types":       []any{"boolean", "string"},
+		"description": "Fingerprint mode: true (use cache), false (no cache), or \"check\" (validate versions).",
+	}
+	properties["threads"] = map[string]any{
+		"type":        "integer",
+		"description": "Max parallel prover invocations.",
+	}
 	return &mcp.Tool{
 		Name:        "race",
-		Description: "Race all available provers on a module/theorem and return the fastest success.",
+		Description: "Race all available provers on one source line or an inclusive line range and return the fastest success.",
 		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"module": map[string]any{
-					"type":        "string",
-					"description": "Path to the TLA+ module file.",
-				},
-				"step": map[string]any{
-					"type":        "string",
-					"description": "Target theorem or subproof.",
-				},
-				"use_fingerprints": map[string]any{
-					"type":          "union",
-					"types":         []any{"boolean", "string"},
-					"description":   "Fingerprint mode: true (use cache), false (no cache), or \"check\" (validate versions).",
-				},
-				"threads": map[string]any{
-					"type":        "integer",
-					"description": "Max parallel prover invocations.",
-				},
-			},
-			"required": []any{"module"},
+			"type":       "object",
+			"properties": properties,
+			"required":   []any{"module"},
+			"oneOf":      targetAlternatives(),
 		},
 	}
 }
@@ -180,20 +174,16 @@ func RaceHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRe
 		}, nil
 	}
 }
-
-// parseRaceArgs extracts RaceArgs from tool call arguments.
 func parseRaceArgs(args map[string]any) (prover.RaceArgs, error) {
-	ra := prover.RaceArgs{FPModes: prover.FPDefault, Threads: 2}
-
-	if v, ok := args["module"].(string); ok {
-		ra.Module = v
-	} else {
-		return ra, nil
+	module, ok := args["module"].(string)
+	if !ok || module == "" {
+		return prover.RaceArgs{}, fmt.Errorf("module is required")
 	}
-	if v, ok := args["step"].(string); ok {
-		ra.Step = v
+	target, err := parseLineTarget(args)
+	if err != nil {
+		return prover.RaceArgs{}, err
 	}
-	// Handle use_fingerprints as boolean or string ("check")
+	ra := prover.RaceArgs{Module: module, Target: target, FPModes: prover.FPDefault, Threads: 2}
 	if v, ok := args["use_fingerprints"].(bool); ok {
 		if !v {
 			ra.FPModes = prover.FPNo
@@ -214,132 +204,74 @@ func parseRaceArgs(args map[string]any) (prover.RaceArgs, error) {
 	return ra, nil
 }
 
-// ---------------------------------------------------------------------------
-// list_theorems
-// ---------------------------------------------------------------------------
-
-// ListTheoremsTool returns the MCP tool definition for list_theorems.
-func ListTheoremsTool() *mcp.Tool {
-	return &mcp.Tool{
-		Name:        "list_theorems",
-		Description: "List all provable targets in a TLA+ module.",
-		InputSchema: map[string]any{
-			"type": "object",
+func targetProperties() map[string]any {
+	return map[string]any{
+		"line": map[string]any{
+			"type":        "integer",
+			"minimum":     1,
+			"description": "One source line; passed to tlapm as --line N.",
+		},
+		"range": map[string]any{
+			"type":        "object",
+			"description": "Inclusive source line range; passed to tlapm as --toolbox START END.",
 			"properties": map[string]any{
-				"module": map[string]any{
-					"type":        "string",
-					"description": "Path to the TLA+ module file.",
-				},
-				"include_subproofs": map[string]any{
-					"type":        "boolean",
-					"description": "Include nested subproof information.",
-				},
+				"start": map[string]any{"type": "integer", "minimum": 1},
+				"end":   map[string]any{"type": "integer", "minimum": 1},
 			},
-			"required": []any{"module"},
+			"required":             []any{"start", "end"},
+			"additionalProperties": false,
 		},
 	}
 }
 
-// ListTheoremsHandler is the tool handler for list_theorems.
-func ListTheoremsHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var args map[string]any
-		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return nil, err
-		}
-		la, err := parseListTheoremsArgs(args)
-		if err != nil {
-			return nil, err
-		}
-		result, err := p.ListTheorems(ctx, la)
-		if err != nil {
-			return nil, err
-		}
-		data, err := json.Marshal(result)
-		if err != nil {
-			return nil, err
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
-		}, nil
-	}
-}
-
-// parseListTheoremsArgs extracts ListTheoremsArgs from tool call arguments.
-func parseListTheoremsArgs(args map[string]any) (prover.ListTheoremsArgs, error) {
-	la := prover.ListTheoremsArgs{}
-
-	if v, ok := args["module"].(string); ok {
-		la.Module = v
-	} else {
-		return la, nil
-	}
-	if v, ok := args["include_subproofs"].(bool); ok {
-		la.IncludeSubproofs = v
-	}
-	return la, nil
-}
-
-// ---------------------------------------------------------------------------
-// resolve_range
-// ---------------------------------------------------------------------------
-
-// ResolveRangeTool returns the MCP tool definition for resolve_range.
-func ResolveRangeTool() *mcp.Tool {
-	return &mcp.Tool{
-		Name:        "resolve_range",
-		Description: "Resolve a range step (e.g. <1>..<3>) against the DFS tree of proof steps in a TLA+ module.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"module": map[string]any{
-					"type":        "string",
-					"description": "Path to the TLA+ module file.",
-				},
-				"step": map[string]any{
-					"type":        "string",
-					"description": "Range step selector, e.g. 'Correctness/<1>..<3>'.",
-				},
-			},
-			"required": []any{"module", "step"},
+func targetAlternatives() []any {
+	return []any{
+		map[string]any{
+			"required": []any{"line"},
+			"not":      map[string]any{"required": []any{"range"}},
+		},
+		map[string]any{
+			"required": []any{"range"},
+			"not":      map[string]any{"required": []any{"line"}},
 		},
 	}
 }
 
-// ResolveRangeHandler resolves a range step against the DFS proof tree.
-func ResolveRangeHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var args map[string]any
-		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return nil, err
-		}
-		ra, err := parseResolveRangeArgs(args)
-		if err != nil {
-			return nil, err
-		}
-		result, err := p.ResolveRange(ctx, ra)
-		if err != nil {
-			return nil, err
-		}
-		data, err := json.Marshal(result)
-		if err != nil {
-			return nil, err
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
-		}, nil
+func parseLineTarget(args map[string]any) (prover.LineTarget, error) {
+	lineValue, hasLine := args["line"]
+	rangeValue, hasRange := args["range"]
+	if hasLine == hasRange {
+		return prover.LineTarget{}, fmt.Errorf("provide exactly one of line or range")
 	}
+	if hasLine {
+		line, err := positiveInteger(lineValue, "line")
+		if err != nil {
+			return prover.LineTarget{}, err
+		}
+		return prover.LineTarget{Line: line}, nil
+	}
+	rangeMap, ok := rangeValue.(map[string]any)
+	if !ok {
+		return prover.LineTarget{}, fmt.Errorf("range must contain start and end line numbers")
+	}
+	start, err := positiveInteger(rangeMap["start"], "range.start")
+	if err != nil {
+		return prover.LineTarget{}, err
+	}
+	end, err := positiveInteger(rangeMap["end"], "range.end")
+	if err != nil {
+		return prover.LineTarget{}, err
+	}
+	if end < start {
+		return prover.LineTarget{}, fmt.Errorf("range.end must not be before range.start")
+	}
+	return prover.LineTarget{Range: &prover.LineRange{Start: start, End: end}}, nil
 }
 
-// parseResolveRangeArgs extracts ResolveRangeArgs from tool call arguments.
-func parseResolveRangeArgs(args map[string]any) (prover.ResolveRangeArgs, error) {
-	ra := prover.ResolveRangeArgs{}
-
-	if v, ok := args["module"].(string); ok {
-		ra.Module = v
+func positiveInteger(value any, name string) (int, error) {
+	n, ok := value.(float64)
+	if !ok || n < 1 || n != float64(int(n)) {
+		return 0, fmt.Errorf("%s must be a positive integer", name)
 	}
-	if v, ok := args["step"].(string); ok {
-		ra.Step = v
-	}
-	return ra, nil
+	return int(n), nil
 }

@@ -7,15 +7,15 @@ Read the top-level `.kb/agents.md` file before continuing below.
 
 # Overview
 
-tlapm-mcp exposes three core tools — `prove`, `race`, and `list_theorems` — plus a `resolve_range` utility tool. The server is a thin wrapper around the `tlapm` CLI binary, spawning it with appropriate flags (`--solver`, `--timing`, `--nofp`, `--line`) and parsing its structured output into typed JSON. The architecture is split across command entry points (thin), a server layer (MCP setup), an RPC layer (handlers and tool definitions), and the prover package (core tlapm orchestration).
+tlapm-mcp exposes two tools, `prove` and `race`. Both accept one source line or an inclusive line range and pass it directly to `tlapm` (`--line` or `--toolbox`). The MCP does not parse TLA+ source; it only parses tlapm output. The architecture is split across command entry points (thin), server setup, RPC handlers/tool definitions, and core tlapm orchestration.
 
 
 # Important
 
-- The server communicates over MCP stdio; all tool I/O is JSON via stdin/stdout.
+- The server communicates over MCP stdio; tool I/O is JSON via stdin/stdout.
 - All timing values are in seconds (floats), never milliseconds.
 - Fingerprint/caching is controlled via `use_fingerprints` accepting `true`, `false`, or `"check"`.
-- Step notation supports both nested paths (`Theorem/<1>/<2>`) and DFS ranges (`Theorem/<1>..<3>`).
+- Exactly one of `line` or `range` is required; ranges have inclusive `start` and `end` source line numbers.
 
 
 # Directory

@@ -27,8 +27,6 @@ func New(p *prover.Prover) *Server {
 func (s *Server) RegisterTools() {
 	s.mcpServer.AddTool(rpc.ProveTool(), rpc.ProveHandler(s.prover))
 	s.mcpServer.AddTool(rpc.RaceTool(), rpc.RaceHandler(s.prover))
-	s.mcpServer.AddTool(rpc.ListTheoremsTool(), rpc.ListTheoremsHandler(s.prover))
-	s.mcpServer.AddTool(rpc.ResolveRangeTool(), rpc.ResolveRangeHandler(s.prover))
 }
 
 // Run starts the MCP stdio server.
