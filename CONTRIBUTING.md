@@ -14,10 +14,10 @@
 
 The server is a thin wrapper around the `tlapm` binary. It:
 
-1. **Parses MCP requests** for `prove`, `race`, `list_theorems`, and `resolve_range`.
-2. **Spawns `tlapm`** with the appropriate flags (`--solver`, `--timing`, `--nofp`, `--line`, etc.).
-3. **Parses tlapm's structured output** (console text + fingerprint files).
-4. **Returns typed JSON** with success/failure, timing breakdowns, and obligation details.
+1. **Parses MCP requests** for `prove` and `race`.
+2. **Passes numeric targets to `tlapm`** using `--line N` for one line or `--toolbox START END` for an inclusive line range.
+3. **Does not parse TLA+ source files**; `tlapm` handles source parsing.
+4. **Parses tlapm output** and returns typed JSON with success/failure, timing, and obligation details.
 
 ## Adding a new tool
 
@@ -41,14 +41,14 @@ New backends are detected automatically by `raceSolvers()` in `internal/prover/r
 # All tests
 go test ./...
 
-# Step parsing tests
-go test ./internal/prover/ -run TestParseStep -v
+# Native line/range targeting tests
+go test ./internal/prover/ -run 'TestProve_RangeTarget|TestRace_RangeTarget' -v -count=1
 
 # Integration tests (spawns tlapm)
 go test ./internal/prover/ -run TestIntegration -v -count=1
 ```
 
-Integration tests use `go:embed` to load TLA+ files from `internal/prover/testdata/`. The prover uses `fs.FS` for filesystem abstraction, so production code uses `os.DirFS(".")` directly while tests embed files.
+Integration tests embed fixtures to exercise module-path validation. The prover checks paths with `fs.FS` but never reads module contents; `tlapm` itself opens and parses the source.
 
 ### Example modules
 
@@ -60,19 +60,23 @@ Integration tests use `go:embed` to load TLA+ files from `internal/prover/testda
 | `examples/proof_more_than_one_leader.tla` | raft spec | Lemma + theorem with nested subproof steps |
 
 
-### Testing subproofs
+### Targeting source lines
+
+Tool calls use one-based source lines. Provide exactly one line or inclusive range:
 
 ```sh
-# Target a specific step by line
+# One line
 tlapm --line 35 Spec.tla
 
-# Target a step by path (the server constructs this from the step field)
-tlapm --timing --solver z3 --line 35 Spec.tla
+# Inclusive line range
+tlapm --toolbox 35 42 Spec.tla
 ```
+
+The MCP passes these arguments directly to `tlapm`; it never scans module contents.
 
 ## Style
 
 - Keep the MCP interface stable. New fields in `Output` are additive.
 - Error messages should be human-readable and machine-parseable.
 - Timing should always be in seconds (floats), never milliseconds.
-- Use the `tlapm` native output format — don't reinvent parsing unless necessary.
+- Never parse module source in MCP code; parse only `tlapm` output.

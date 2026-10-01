@@ -7,17 +7,17 @@ Read the top-level `.kb/agents.md` file before continuing below.
 
 # Overview
 
-The `prover/` package is the heart of tlapm-mcp. It orchestrates tlapm binary invocations, parses structured output (timing, obligations, success/failure), handles fingerprint caching, and resolves step notation (nested paths and DFS ranges). The package uses `fs.FS` for filesystem abstraction, enabling `os.DirFS(".")` in production and `embed.FS` in tests.
+The `prover/` package invokes tlapm for numeric source-line targets, parses tlapm output, and handles fingerprint caching. It never reads or parses module contents; a single line maps to `--line`, and an inclusive range maps to `--toolbox`.
 
 
 # Architecture
 
 The prover follows a layered approach:
 
-1. **Invocation**: `buildProveCmd()` constructs the `exec.Cmd` with solver, timing, fingerprint, and line flags.
-2. **Parsing**: `parseResult()` parses tlapm's console output into `Result` structs with timing breakdowns and obligation details.
+1. **Invocation**: `buildProveCmd()` and `raceSolvers()` construct tlapm commands with solver, timing, fingerprint, and target flags.
+2. **Output parsing**: `parseResult()` parses tlapm console output into `Result` fields for success/failure, timing, and obligations.
 3. **Fingerprinting**: `FPMode` enum (`FPDefault`, `FPNo`, `FPCheck`) controls cache behavior via `--usefp`, `--nofp`, and `--safefp` flags.
-4. **Step resolution**: `ParseStep()` handles nested paths (`<1>/<2>`) and DFS ranges (`<1>..<3>`) via `buildDFSTree()`.
+4. **Targeting**: `LineTarget` maps one-based lines to `--line N` and inclusive ranges to `--toolbox START END`.
 
 
 # Important
@@ -31,11 +31,9 @@ The prover follows a layered approach:
 
 # Directory
 
-- `prover.go` - `Prover` struct, argument types, `Prove()`, `Race()`, `ListTheorems()`, `ResolveRange()`, and `buildProveCmd()`.
-- `result.go` - Output types (`Result`, `RaceResult`, `ListResult`), `parseResult()`, `raceSolvers()`, `listTheorems()`.
-- `step.go` - `ParseStep()`, `Step` struct, `StepKind` enum, `buildDFSTree()`, `ResolveStepRange()`.
-- `errors.go` - `TLAPMError` struct, error codes, `WrapToolError()`, `DetectErrorClass()`, `LogError()`.
-- `step_test.go` - Unit tests for step parsing.
-- `integration_test.go` - Integration tests covering prove, race, list_theorems, DFS resolution, and fingerprint caching.
-- `testdata/` - TLA⁺ example files embedded by integration tests (arithmetic, failing, folding, hard_proofs, sequences). All derived from https://github.com/tlaplus/CommunityModules/ and abide to its MIT license terms.
+- `prover.go` - `Prover`, line/range argument types, `Prove()`, `Race()`, filesystem path checks, and `buildProveCmd()`.
+- `result.go` - Output types (`Result`, `RaceResult`), `parseResult()`, and `raceSolvers()`.
+- `errors.go` - `TLAPMError` struct, error codes, `WrapToolError()`, `DetectErrorClass()`, `LogError()`, and module path checks.
+- `integration_test.go` - Integration coverage for line/range prove and race, output parsing, and fingerprint caching.
+- `testdata/` - TLA⁺ example modules embedded by integration tests (arithmetic, failing, folding, hard_proofs, sequences). All derived from https://github.com/tlaplus/CommunityModules/ and abide to its MIT license terms.
 

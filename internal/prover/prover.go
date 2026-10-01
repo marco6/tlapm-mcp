@@ -3,6 +3,7 @@ package prover
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -11,7 +12,7 @@ import (
 
 // Prover runs tlapm and parses its output.
 type Prover struct {
-	// FS is the filesystem used for reading module files.
+	// FS is used to validate module paths; module contents are never read.
 	// When nil, os.DirFS(".") is used.
 	FS fs.FS
 }
@@ -60,35 +61,63 @@ func (m FPMode) String() string {
 	}
 }
 
+// LineRange identifies an inclusive source line range.
+type LineRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+// LineTarget identifies either one source line or an inclusive line range.
+type LineTarget struct {
+	Line  int
+	Range *LineRange
+}
+
+// validate rejects missing, conflicting, and invalid line targets.
+func (t LineTarget) validate() error {
+	if t.Line > 0 && t.Range == nil {
+		return nil
+	}
+	if t.Line == 0 && t.Range != nil && t.Range.Start > 0 && t.Range.End >= t.Range.Start {
+		return nil
+	}
+	return errors.New("exactly one positive line or valid range is required")
+}
+
+// appendCommandArgs adds tlapm's native target flags to args.
+func (t LineTarget) appendCommandArgs(args []string) []string {
+	if t.Range == nil {
+		return append(args, "--line", strconv.Itoa(t.Line))
+	}
+	return append(args, "--toolbox", strconv.Itoa(t.Range.Start), strconv.Itoa(t.Range.End))
+}
+
 // ProveArgs holds the arguments for a prove invocation.
 type ProveArgs struct {
-	Module   string    // path to .tla file
-	Step     string    // theorem/subproof selector
-	Solver   string    // solver name (empty = tlapm default)
-	FPModes  FPMode    // fingerprint mode (default: use cached)
-	Threads  int       // worker threads
+	Module  string     // path to .tla file
+	Target  LineTarget // single source line or inclusive line range
+	Solver  string     // solver name (empty = tlapm default)
+	FPModes FPMode     // fingerprint mode (default: use cached)
+	Threads int        // worker threads
 }
 
 // RaceArgs holds the arguments for a race invocation.
 type RaceArgs struct {
-	Module  string   // path to .tla file
-	Step    string   // theorem/subproof selector
-	FPModes FPMode   // fingerprint mode (default: use cached)
-	Threads int      // max parallel invocations
+	Module  string     // path to .tla file
+	Target  LineTarget // single source line or inclusive line range
+	FPModes FPMode     // fingerprint mode (default: use cached)
+	Threads int        // max parallel invocations
 }
 
-// ListTheoremsArgs holds the arguments for list_theorems.
-type ListTheoremsArgs struct {
-	Module           string
-	IncludeSubproofs bool
-}
-
-// Prove runs tlapm on the given module/step and returns the parsed result.
+// Prove runs tlapm on the given module/target and parses the tool output.
 func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
+	cmd, err := p.buildProveCmd(args)
+	if err != nil {
+		return Result{}, err
+	}
 	if err := EnsureModuleExists(p.resolveFS(), args.Module); err != nil {
 		return Result{}, err
 	}
-	cmd := p.buildProveCmd(args)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		tlapmErr := ParseExitCodeError("prove", output, err)
@@ -103,33 +132,13 @@ func (p *Prover) Race(ctx context.Context, args RaceArgs) (RaceResult, error) {
 	return raceSolvers(ctx, args, solvers)
 }
 
-// ListTheorems parses the TLA+ file and returns all provable targets.
-func (p *Prover) ListTheorems(ctx context.Context, args ListTheoremsArgs) (ListResult, error) {
-	return listTheorems(p.resolveFS(), ctx, args.Module, args.IncludeSubproofs)
-}
-
-// ResolveRangeArgs holds the arguments for a resolve_range invocation.
-type ResolveRangeArgs struct {
-	Module string // path to .tla file
-	Step   string // range step selector, e.g. "Correctness/<1>..<3>"
-}
-
-// ResolveRange resolves a range step against the DFS tree built from the module file.
-func (p *Prover) ResolveRange(ctx context.Context, args ResolveRangeArgs) (ResolvedRange, error) {
-	content, err := fs.ReadFile(p.resolveFS(), args.Module)
-	if err != nil {
-		return ResolvedRange{}, err
-	}
-	s, err := ParseStep(args.Step)
-	if err != nil {
-		return ResolvedRange{}, err
-	}
-	return s.ResolveStepRange(string(content))
-}
-
 // buildProveCmd constructs the exec.Cmd for a prove invocation.
-func (p *Prover) buildProveCmd(args ProveArgs) *exec.Cmd {
+func (p *Prover) buildProveCmd(args ProveArgs) (*exec.Cmd, error) {
+	if err := args.Target.validate(); err != nil {
+		return nil, err
+	}
 	cmdArgs := []string{"--timing"}
+	cmdArgs = args.Target.appendCommandArgs(cmdArgs)
 
 	if args.Solver != "" {
 		cmdArgs = append(cmdArgs, "--solver", args.Solver)
@@ -145,10 +154,7 @@ func (p *Prover) buildProveCmd(args ProveArgs) *exec.Cmd {
 	case FPDefault:
 		// default: use cached (no extra flag needed)
 	}
-	if args.Step != "" {
-		cmdArgs = append(cmdArgs, args.Step)
-	}
 	cmdArgs = append(cmdArgs, args.Module)
 
-	return exec.Command("tlapm", cmdArgs...)
+	return exec.Command("tlapm", cmdArgs...), nil
 }

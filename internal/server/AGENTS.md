@@ -7,7 +7,7 @@ Read the top-level `.kb/agents.md` file before continuing below.
 
 # Overview
 
-The `server/` package contains the MCP server setup logic. It creates the MCP server instance, registers all tools with their handlers, and manages the stdio transport for client communication.
+The `server/` package creates the MCP server instance, registers the `prove` and `race` tools, and manages stdio transport.
 
 
 # Directory
