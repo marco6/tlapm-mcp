@@ -52,6 +52,51 @@ func TestProofToolsExposeFlattenedTargetsAndOptions(t *testing.T) {
 	}
 }
 
+func TestCheckToolAllowsOptionalTargets(t *testing.T) {
+	tool := CheckTool()
+	schema := tool.InputSchema.(map[string]any)
+	properties := schema["properties"].(map[string]any)
+	if !reflect.DeepEqual(schema["required"], []any{"module"}) {
+		t.Fatalf("required = %#v, want only module", schema["required"])
+	}
+	alternatives, ok := schema["oneOf"].([]any)
+	if !ok || len(alternatives) != 3 {
+		t.Fatalf("oneOf = %#v, want line, range, and no-target alternatives", schema["oneOf"])
+	}
+	for _, name := range []string{"module", "line", "from", "to"} {
+		if _, ok := properties[name]; !ok {
+			t.Errorf("check schema is missing %q", name)
+		}
+	}
+	if _, ok := properties["cached"]; ok {
+		t.Error("check schema should not expose proof cache options")
+	}
+}
+
+func TestParseCheckArgs(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		args    map[string]any
+		want    prover.CheckArgs
+		wantErr bool
+	}{
+		{name: "whole module", args: map[string]any{"module": "Spec.tla"}, want: prover.CheckArgs{Module: "Spec.tla"}},
+		{name: "line", args: map[string]any{"module": "Spec.tla", "line": float64(9)}, want: prover.CheckArgs{Module: "Spec.tla", Target: prover.LineTarget{Line: 9}}},
+		{name: "range", args: map[string]any{"module": "Spec.tla", "from": float64(9), "to": float64(13)}, want: prover.CheckArgs{Module: "Spec.tla", Target: prover.LineTarget{Range: &prover.LineRange{Start: 9, End: 13}}}},
+		{name: "incomplete range", args: map[string]any{"module": "Spec.tla", "from": float64(9)}, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseCheckArgs(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseCheckArgs() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err == nil && !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("parseCheckArgs() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseCachedOption(t *testing.T) {
 	parsers := []struct {
 		name  string
