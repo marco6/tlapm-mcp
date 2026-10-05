@@ -29,6 +29,36 @@ Replace both paths with the repository location. Then ask the client: “Prove l
 
 ## MCP Tools
 
+### `check`
+
+Parse and elaborate a module without launching proof backends. Targeting is optional: omit `line`, `from`, and `to` to check the whole module, or provide one line or an inclusive range.
+
+```jsonc
+{
+  "module": "/path/to/Spec.tla"
+}
+```
+
+```jsonc
+{
+  "module": "/path/to/Spec.tla",
+  "from": 28,
+  "to": 34
+}
+```
+
+The check runs TLAPM in no-backend summary mode. `success` means parsing and elaboration completed; it does not mean the proof obligations were proved. Diagnostics contain `line`, `column`, `severity`, and `message`; a zero line or column means TLAPM did not report that location. `obligation_count` is included when TLAPM reports it. For an abnormal TLAPM exit, the response also includes `exit_code` and `stderr`.
+
+```jsonc
+{
+  "success": true,
+  "module": "/path/to/Spec.tla",
+  "range": { "start": 28, "end": 34 },
+  "diagnostics": [],
+  "obligation_count": 2
+}
+```
+
 ### `prove`
 
 Prove one source line or an inclusive source line range. Provide either `line` or both `from` and `to`.

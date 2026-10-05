@@ -7,7 +7,7 @@ Read the top-level `.kb/agents.md` file before continuing below.
 
 # Overview
 
-tlapm-mcp exposes two tools, `prove` and `race`. Both accept one source line or an inclusive line range and pass it directly to `tlapm` (`--line` or `--toolbox`). The MCP does not parse TLA+ source; it only parses tlapm output. The architecture is split across command entry points (thin), server setup, RPC handlers/tool definitions, and core tlapm orchestration.
+tlapm-mcp exposes three tools: `check`, `prove`, and `race`. `check` parses and elaborates a whole module or optional source target without launching backends; `prove` and `race` require one source line or an inclusive line range. The MCP does not parse TLA+ source; it parses TLAPM output. The architecture is split across command entry points (thin), server setup, RPC handlers/tool definitions, and core TLAPM orchestration.
 
 
 # Important
@@ -15,7 +15,7 @@ tlapm-mcp exposes two tools, `prove` and `race`. Both accept one source line or 
 - The server communicates over MCP stdio; tool I/O is JSON via stdin/stdout.
 - All timing values are in seconds (floats), never milliseconds.
 - Cached proof results are controlled by `cached` (`true` by default; `false` disables caching).
-- Exactly one target form is required: `line`, or inclusive `from` and `to` values.
+- `prove` and `race` require exactly one target form: `line`, or inclusive `from` and `to` values. `check` accepts no target or either target form.
 
 
 # Directory
@@ -27,8 +27,6 @@ tlapm-mcp exposes two tools, `prove` and `race`. Both accept one source line or 
 - `go.sum` - Go dependency checksums.
 - `README.md` - Project readme with tool schemas and examples.
 - `CONTRIBUTING.md` - Contribution guide with Go-specific notes.
-- `TODO.md` - Implementation todo list and acceptance criteria.
-
 
 # Documents
 
