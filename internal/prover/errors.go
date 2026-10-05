@@ -25,6 +25,8 @@ const (
 	ErrFingerprintCorrupted ErrCode = "FINGERPRINT_CORRUPTED"
 	// ErrParse is returned when tlapm output cannot be parsed.
 	ErrParse ErrCode = "PARSE_ERROR"
+	// ErrNoObligations is returned when the selected target produces no proof obligations.
+	ErrNoObligations ErrCode = "NO_OBLIGATIONS"
 	// ErrExitCode is returned when tlapm exits with a non-zero code.
 	ErrExitCode ErrCode = "EXIT_CODE"
 	// ErrStep is returned when a step selector is invalid.

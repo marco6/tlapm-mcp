@@ -14,16 +14,16 @@ The prover invokes tlapm for numeric source-line targets, parses tlapm output co
 
 The prover follows a layered approach:
 
-1. **Invocation**: `buildProveCmd()` selects an optional SMT solver with `--solver`; `raceSolvers()` selects each fixed TLAPM method with `--method` and adds timing, fingerprint, and target flags.
-2. **Output parsing**: `parseResult()` only marks a proof complete on an aggregate `[INFO]: All N obligations proved.` line with no `[ERROR]:` lines; callers also require a zero process exit status.
-3. **Fingerprinting**: `FPMode` enum (`FPDefault`, `FPNo`, `FPCheck`) controls cache behavior via `--usefp`, `--nofp`, and `--safefp` flags.
-4. **Targeting**: `LineTarget` maps one-based lines to `--line N` and inclusive ranges to `--toolbox START END`.
+1. **Invocation**: `buildProveCmd()` uses TLAPM's configured proof method; `raceSolvers()` selects each fixed TLAPM method with `--method` and adds timing, fingerprint, and target flags. Race concurrency is capped at two invocations.
+2. **Output parsing**: `parseResult()` only marks a proof complete on an aggregate `[INFO]: All N obligations proved.` line where `N > 0` and there are no `[ERROR]:` lines; callers also require a zero process exit status. A zero-obligation summary is classified as `NO_OBLIGATIONS`.
+3. **Fingerprinting**: `FPMode` enum (`FPDefault`, `FPNo`, `FPCheck`) controls cache behavior via `--usefp`, `--nofp`, and `--safefp` flags. The MCP exposes only `cached: true|false`.
+4. **Targeting**: the MCP accepts a one-based `line` or inclusive `from`/`to` target and passes it as `--line N` or `--toolbox FROM TO`.
 
 
 # Important
 
 - **Timing**: All timing values are in seconds (float64), never milliseconds.
-- **Fingerprints**: Default mode (`FPDefault`) uses cached results; `FPNo` ignores cache; `FPCheck` validates versions before using cache.
+- **Cache behavior**: The MCP's `cached` option defaults to true (TLAPM's default); false ignores cached proofs. `FPCheck` remains an internal prover mode.
 - **Error handling**: `TLAPMError` struct provides typed errors with codes (`ErrModuleNotFound`, `ErrSolverUnavailable`, etc.).
 - **Methods**: `Prover.Race` uses a fixed method list with `--method`; it does not inspect `tlapm --config`. Missing TLAPM is returned as `TLAPM_NOT_FOUND`; a method-level failure is not proof success.
 - **FS abstraction**: Relative paths use `os.DirFS(".")` in production and `embed.FS` in tests; absolute paths are checked with `os.Stat`.

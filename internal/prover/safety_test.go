@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"testing"
 )
 
@@ -33,6 +32,11 @@ func TestParseResultRequiresAggregateProofCompletion(t *testing.T) {
 			name:     "single obligation is not completion",
 			output:   "[INFO]: 1 obligation proved.\n",
 			wantCode: string(ErrParse),
+		},
+		{
+			name:     "zero obligations is not proof completion",
+			output:   "[INFO]: All 0 obligation proved.\n",
+			wantCode: string(ErrNoObligations),
 		},
 		{
 			name:     "error overrides completion summary",
@@ -64,11 +68,21 @@ func TestParseResultRequiresAggregateProofCompletion(t *testing.T) {
 func TestAllObligationsProvedRejectsPartialAndConflictingOutput(t *testing.T) {
 	for _, output := range []string{
 		"[INFO]: 1 obligation proved.\n",
+		"[INFO]: All 0 obligation proved.\n",
 		"[INFO]: All 37 obligations proved.\n[ERROR]: a later obligation failed\n",
 	} {
 		if allObligationsProved(output) {
 			t.Errorf("allObligationsProved(%q) = true", output)
 		}
+	}
+}
+
+func TestHasZeroObligationCompletionRejectsErrors(t *testing.T) {
+	if !hasZeroObligationCompletion("[INFO]: All 0 obligations proved.\n") {
+		t.Fatal("hasZeroObligationCompletion() = false for zero-obligation completion")
+	}
+	if hasZeroObligationCompletion("[INFO]: All 0 obligations proved.\n[ERROR]: a proof obligation failed\n") {
+		t.Fatal("hasZeroObligationCompletion() = true with an error line")
 	}
 }
 
@@ -104,25 +118,10 @@ func TestRaceReturnsTLAPMNotFound(t *testing.T) {
 		Module:  "Spec.tla",
 		Target:  LineTarget{Line: 1},
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	var tlapmErr *TLAPMError
 	if !errors.As(err, &tlapmErr) || tlapmErr.Code != ErrTLAPMNotFound {
 		t.Fatalf("Race error = %v, want TLAPM_NOT_FOUND", err)
-	}
-}
-
-func TestRaceSolversRejectsNonPositiveThreads(t *testing.T) {
-	for _, threads := range []int{0, -1} {
-		t.Run(strconv.Itoa(threads), func(t *testing.T) {
-			_, err := raceSolvers(context.Background(), RaceArgs{
-				Target:  LineTarget{Line: 1},
-				Threads: threads,
-			}, []string{"smt"})
-			if err == nil {
-				t.Fatalf("raceSolvers(threads=%d) returned nil error", threads)
-			}
-		})
 	}
 }
 

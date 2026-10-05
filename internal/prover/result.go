@@ -18,7 +18,6 @@ type Result struct {
 	Module           string             `json:"module"`
 	Line             int                `json:"line,omitempty"`
 	Range            *LineRange         `json:"range,omitempty"`
-	Solver           string             `json:"solver"`
 	TotalTime        float64            `json:"total_time_seconds"`
 	Timing           map[string]float64 `json:"timing"`
 	Obligations      []Obligation       `json:"obligations,omitempty"`
@@ -57,7 +56,6 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 		Module:           moduleName(args.Module),
 		Line:             args.Target.Line,
 		Range:            args.Target.Range,
-		Solver:           args.Solver,
 		FingerprintsUsed: args.FPModes.String(),
 		Timing:           make(map[string]float64),
 	}
@@ -93,9 +91,12 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 
 	// Set error code based on success state and output content
 	if !r.Success {
-		if strings.Contains(output, "corrupt") || strings.Contains(output, "invalid fingerprint") {
+		switch {
+		case strings.Contains(output, "corrupt") || strings.Contains(output, "invalid fingerprint"):
 			r.ErrorCode = string(ErrFingerprintCorrupted)
-		} else {
+		case hasZeroObligationCompletion(output):
+			r.ErrorCode = string(ErrNoObligations)
+		default:
 			r.ErrorCode = string(ErrParse)
 		}
 	}
@@ -103,20 +104,43 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 	return r, nil
 }
 
-var proofCompletionRe = regexp.MustCompile(`^\[INFO\]:\s*All\s+\d+\s+obligations?\s+proved\.?$`)
+var proofCompletionRe = regexp.MustCompile(`^\[INFO\]:\s*All\s+(\d+)\s+obligations?\s+proved\.?$`)
+
+func completedObligationCount(output string) (int, bool) {
+	count := 0
+	found := false
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if m := proofCompletionRe.FindStringSubmatch(line); m != nil {
+			n, err := strconv.Atoi(m[1])
+			if err == nil && (!found || n > count) {
+				count = n
+				found = true
+			}
+		}
+	}
+	return count, found
+}
+
+func hasZeroObligationCompletion(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "[ERROR]:") {
+			return false
+		}
+	}
+	count, found := completedObligationCount(output)
+	return found && count == 0
+}
 
 func allObligationsProved(output string) bool {
-	complete := false
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "[ERROR]:") {
 			return false
 		}
-		if proofCompletionRe.MatchString(line) {
-			complete = true
-		}
 	}
-	return complete
+	count, found := completedObligationCount(output)
+	return found && count > 0
 }
 
 // moduleName extracts the module name from a file path.
@@ -162,13 +186,12 @@ func parseTotalTime(output string) float64 {
 	return 0
 }
 
-// raceSolvers runs all methods in parallel and returns sorted results.
+// raceParallelism caps concurrent method invocations at a fixed value; it is not an MCP option.
+const raceParallelism = 2
+
 func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResult, error) {
 	if err := args.Target.validate(); err != nil {
 		return RaceResult{}, err
-	}
-	if args.Threads <= 0 {
-		return RaceResult{}, fmt.Errorf("threads must be a positive integer")
 	}
 	type result struct {
 		solver string
@@ -180,7 +203,7 @@ func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResu
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	parallelism := args.Threads
+	parallelism := raceParallelism
 	if parallelism > len(methods) {
 		parallelism = len(methods)
 	}
@@ -211,6 +234,8 @@ func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResu
 			} else if allObligationsProved(string(out)) {
 				r.Success = true
 				r.ObligationsFailed = 0
+			} else if hasZeroObligationCompletion(string(out)) {
+				r.Error = "TLAPM reported zero proof obligations for the selected target"
 			} else {
 				r.Error = "TLAPM output did not confirm that all obligations were proved"
 			}

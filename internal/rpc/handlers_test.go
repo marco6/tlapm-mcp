@@ -2,7 +2,6 @@ package rpc
 
 import (
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -10,7 +9,7 @@ import (
 	"github.com/tlaplus/tlapm-mcp/internal/prover"
 )
 
-func TestProofToolsExposeLineOrRangeTargets(t *testing.T) {
+func TestProofToolsExposeFlattenedTargetsAndOptions(t *testing.T) {
 	tools := []struct {
 		name string
 		tool *mcp.Tool
@@ -20,99 +19,109 @@ func TestProofToolsExposeLineOrRangeTargets(t *testing.T) {
 	}
 	for _, tt := range tools {
 		t.Run(tt.name, func(t *testing.T) {
-			schema, ok := tt.tool.InputSchema.(map[string]any)
-			if !ok {
-				t.Fatal("input schema is not an object")
+			schema := tt.tool.InputSchema.(map[string]any)
+			properties := schema["properties"].(map[string]any)
+			for _, name := range []string{"line", "from", "to"} {
+				field, ok := properties[name].(map[string]any)
+				if !ok || field["type"] != "integer" || field["minimum"] != 1 {
+					t.Errorf("%s schema = %#v, want positive integer", name, properties[name])
+				}
 			}
-			properties, ok := schema["properties"].(map[string]any)
-			if !ok {
-				t.Fatal("input schema has no properties object")
+			for _, removed := range []string{"range", "solver", "threads", "use_fingerprints"} {
+				if _, exists := properties[removed]; exists {
+					t.Errorf("removed property %q remains in schema", removed)
+				}
 			}
-			line, ok := properties["line"].(map[string]any)
-			if !ok || line["type"] != "integer" || line["minimum"] != 1 {
-				t.Fatalf("line schema = %#v, want one-based integer", properties["line"])
+			cached, ok := properties["cached"].(map[string]any)
+			if !ok || cached["type"] != "boolean" {
+				t.Errorf("cached schema = %#v, want boolean", properties["cached"])
 			}
-			lineDescription, _ := line["description"].(string)
-			if !strings.Contains(lineDescription, "--line N") {
-				t.Errorf("line description = %q, want --line N", lineDescription)
+			alternatives, ok := schema["oneOf"].([]any)
+			if !ok || len(alternatives) != 2 {
+				t.Fatalf("oneOf = %#v, want line and range alternatives", schema["oneOf"])
 			}
-
-			rangeSchema, ok := properties["range"].(map[string]any)
-			if !ok || rangeSchema["type"] != "object" {
-				t.Fatalf("range schema = %#v, want object", properties["range"])
+			lineAlternative := alternatives[0].(map[string]any)
+			rangeAlternative := alternatives[1].(map[string]any)
+			if !reflect.DeepEqual(lineAlternative["required"], []any{"line"}) {
+				t.Errorf("line alternative required = %#v", lineAlternative["required"])
 			}
-			rangeDescription, _ := rangeSchema["description"].(string)
-			if !strings.Contains(rangeDescription, "--toolbox START END") {
-				t.Errorf("range description = %q, want --toolbox START END", rangeDescription)
-			}
-			oneOf, ok := schema["oneOf"].([]any)
-			if !ok || len(oneOf) != 2 {
-				t.Errorf("oneOf = %#v, want separate line and range alternatives", schema["oneOf"])
+			if !reflect.DeepEqual(rangeAlternative["required"], []any{"from", "to"}) {
+				t.Errorf("range alternative required = %#v", rangeAlternative["required"])
 			}
 		})
 	}
 }
 
-func TestProofOptionSchemasUseStandardConstraints(t *testing.T) {
-	for _, tool := range []*mcp.Tool{ProveTool(), RaceTool()} {
-		schema := tool.InputSchema.(map[string]any)
-		properties := schema["properties"].(map[string]any)
-		threads := properties["threads"].(map[string]any)
-		if threads["type"] != "integer" || threads["minimum"] != 1 {
-			t.Errorf("%s threads schema = %#v, want positive integer", tool.Name, threads)
-		}
-		mode := properties["use_fingerprints"].(map[string]any)
-		branches, ok := mode["anyOf"].([]any)
-		if !ok || len(branches) != 2 {
-			t.Fatalf("%s fingerprint schema = %#v, want standard anyOf", tool.Name, mode)
-		}
-		stringBranch := branches[1].(map[string]any)
-		if stringBranch["type"] != "string" || !reflect.DeepEqual(stringBranch["enum"], []any{"check"}) {
-			t.Errorf("%s fingerprint string schema = %#v", tool.Name, stringBranch)
-		}
-	}
-}
-
-func TestParseFingerprintModes(t *testing.T) {
-	for _, tt := range []struct {
-		value any
-		want  prover.FPMode
-	}{
-		{value: true, want: prover.FPDefault},
-		{value: false, want: prover.FPNo},
-		{value: "check", want: prover.FPCheck},
-	} {
-		got, err := parseFingerprintMode(tt.value)
-		if err != nil || got != tt.want {
-			t.Errorf("parseFingerprintMode(%v) = %v, %v; want %v, nil", tt.value, got, err, tt.want)
-		}
-	}
-}
-
-func TestArgumentParsingRejectsInvalidThreadAndFingerprintValues(t *testing.T) {
-	base := map[string]any{"module": "Spec.tla", "line": float64(1)}
-	for _, tt := range []struct {
+func TestParseCachedOption(t *testing.T) {
+	parsers := []struct {
 		name  string
-		args  map[string]any
-		parse func(map[string]any) error
+		parse func(map[string]any) (prover.FPMode, error)
 	}{
-		{name: "prove zero threads", args: map[string]any{"threads": float64(0)}, parse: func(a map[string]any) error { _, err := parseProveArgs(a); return err }},
-		{name: "prove negative threads", args: map[string]any{"threads": float64(-1)}, parse: func(a map[string]any) error { _, err := parseProveArgs(a); return err }},
-		{name: "prove unknown cache mode", args: map[string]any{"use_fingerprints": "typo"}, parse: func(a map[string]any) error { _, err := parseProveArgs(a); return err }},
-		{name: "race zero threads", args: map[string]any{"threads": float64(0)}, parse: func(a map[string]any) error { _, err := parseRaceArgs(a); return err }},
-		{name: "race negative threads", args: map[string]any{"threads": float64(-1)}, parse: func(a map[string]any) error { _, err := parseRaceArgs(a); return err }},
-		{name: "race unknown cache mode", args: map[string]any{"use_fingerprints": "typo"}, parse: func(a map[string]any) error { _, err := parseRaceArgs(a); return err }},
+		{
+			name: "prove",
+			parse: func(args map[string]any) (prover.FPMode, error) {
+				parsed, err := parseProveArgs(args)
+				return parsed.FPModes, err
+			},
+		},
+		{
+			name: "race",
+			parse: func(args map[string]any) (prover.FPMode, error) {
+				parsed, err := parseRaceArgs(args)
+				return parsed.FPModes, err
+			},
+		},
+	}
+	for _, parser := range parsers {
+		for _, tt := range []struct {
+			name    string
+			args    map[string]any
+			want    prover.FPMode
+			wantErr bool
+		}{
+			{name: "default", want: prover.FPDefault},
+			{name: "enabled", args: map[string]any{"cached": true}, want: prover.FPDefault},
+			{name: "disabled", args: map[string]any{"cached": false}, want: prover.FPNo},
+			{name: "non-boolean", args: map[string]any{"cached": "check"}, wantErr: true},
+		} {
+			t.Run(parser.name+"/"+tt.name, func(t *testing.T) {
+				args := map[string]any{"module": "Spec.tla", "line": float64(1)}
+				for key, value := range tt.args {
+					args[key] = value
+				}
+				got, err := parser.parse(args)
+				if (err != nil) != tt.wantErr {
+					t.Fatalf("parse cached args error = %v, wantErr %v", err, tt.wantErr)
+				}
+				if err == nil && got != tt.want {
+					t.Fatalf("parse cached args = %v, want %v", got, tt.want)
+				}
+			})
+		}
+	}
+}
+
+func TestParseFlattenedLineTargets(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		args    map[string]any
+		want    prover.LineTarget
+		wantErr bool
+	}{
+		{name: "line", args: map[string]any{"line": float64(4)}, want: prover.LineTarget{Line: 4}},
+		{name: "inclusive range", args: map[string]any{"from": float64(4), "to": float64(7)}, want: prover.LineTarget{Range: &prover.LineRange{Start: 4, End: 7}}},
+		{name: "reversed range", args: map[string]any{"from": float64(7), "to": float64(4)}, wantErr: true},
+		{name: "incomplete range", args: map[string]any{"from": float64(4)}, wantErr: true},
+		{name: "both target forms", args: map[string]any{"line": float64(4), "from": float64(4), "to": float64(7)}, wantErr: true},
+		{name: "nested legacy range", args: map[string]any{"range": map[string]any{"start": float64(4), "end": float64(7)}}, wantErr: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			args := make(map[string]any, len(base)+len(tt.args))
-			for key, value := range base {
-				args[key] = value
+			got, err := parseLineTarget(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseLineTarget() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			for key, value := range tt.args {
-				args[key] = value
-			}
-			if err := tt.parse(args); err == nil {
-				t.Fatal("expected validation error")
+			if err == nil && !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("parseLineTarget() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}

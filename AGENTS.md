@@ -14,8 +14,8 @@ tlapm-mcp exposes two tools, `prove` and `race`. Both accept one source line or 
 
 - The server communicates over MCP stdio; tool I/O is JSON via stdin/stdout.
 - All timing values are in seconds (floats), never milliseconds.
-- Fingerprint/caching is controlled via `use_fingerprints` accepting `true`, `false`, or `"check"`.
-- Exactly one of `line` or `range` is required; ranges have inclusive `start` and `end` source line numbers.
+- Cached proof results are controlled by `cached` (`true` by default; `false` disables caching).
+- Exactly one target form is required: `line`, or inclusive `from` and `to` values.
 
 
 # Directory
