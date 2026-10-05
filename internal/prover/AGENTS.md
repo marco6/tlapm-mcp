@@ -24,7 +24,7 @@ The prover follows a layered approach:
 
 - **Timing**: All timing values are in seconds (float64), never milliseconds.
 - **Cache behavior**: The MCP's `cached` option defaults to true (TLAPM's default); false ignores cached proofs. `FPCheck` remains an internal prover mode.
-- **Error handling**: `TLAPMError` struct provides typed errors with codes (`ErrModuleNotFound`, `ErrSolverUnavailable`, etc.).
+- **Error handling**: `TLAPMError` classifies invalid targets, TLAPM parse/proof/backend failures, fingerprint corruption, MCP cancellation, and exits without diagnostics.
 - **Obligation records**: toolbox status events are merged by run-local obligation ID; only unresolved results are returned. `being proved` and `interrupted` map to `timeout`; obligations without a terminal result map to `backend-error`.
 - **Methods**: `Prover.Race` uses a fixed method list with `--method`; it does not inspect `tlapm --config`. Missing TLAPM is returned as `TLAPM_NOT_FOUND`; a method-level failure is not proof success.
 - **FS abstraction**: Relative paths use `os.DirFS(".")` in production and `embed.FS` in tests; absolute paths are checked with `os.Stat`.

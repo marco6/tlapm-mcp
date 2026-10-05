@@ -89,8 +89,15 @@ func consumeToolboxEvent(event *toolboxEvent, indices map[int]int, obligations *
 	rawStatus := strings.ToLower(strings.TrimSpace(event.fields["status"]))
 	if rawStatus != "" && (obligation.Status == "" || event.hasBackend || rawStatus == "trivial") {
 		obligation.Status = normalizeObligationStatus(rawStatus)
+		reason := event.fields["reason"]
 		if obligation.Status == "failed" {
-			obligation.FailureReason = event.fields["reason"]
+			normalizedReason := strings.NewReplacer("-", " ", "_", " ").Replace(strings.ToLower(reason))
+			if strings.Contains(normalizedReason, "timeout") || strings.Contains(normalizedReason, "time limit") {
+				obligation.Status = "timeout"
+			}
+		}
+		if obligation.Status == "failed" {
+			obligation.FailureReason = reason
 			if obligation.FailureReason == "" {
 				obligation.FailureReason = "TLAPM reported that the obligation failed"
 			}

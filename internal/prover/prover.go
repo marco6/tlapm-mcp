@@ -115,11 +115,11 @@ type RaceArgs struct {
 
 // Prove runs tlapm on the given module/target and parses the tool output.
 func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
-	cmd, err := p.buildProveCmd(args)
+	cmd, err := p.buildProveCmd(ctx, args)
 	if err != nil {
-		return Result{}, err
+		return Result{}, WrapToolError("prove", ErrInvalidRange, err.Error(), "")
 	}
-	if err := EnsureModuleExists(p.resolveFS(), args.Module); err != nil {
+	if err := ensureModuleExists("prove", p.resolveFS(), args.Module); err != nil {
 		return Result{}, err
 	}
 	if err := ensureTLAPMBinary("prove"); err != nil {
@@ -130,6 +130,9 @@ func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
 	output, commandErr := cmd.CombinedOutput()
 	var toolErr error
 	if commandErr != nil {
+		if ctx.Err() != nil {
+			return Result{}, RequestContextError("prove", ctx.Err())
+		}
 		toolErr = ParseExitCodeError("prove", output, commandErr)
 		LogError("prove", toolErr)
 		if tErr, ok := toolErr.(*TLAPMError); ok && tErr.Code == ErrTLAPMNotFound {
@@ -155,6 +158,9 @@ func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
 // Race runs the supported TLAPM methods in parallel and returns sorted results.
 func (p *Prover) Race(ctx context.Context, args RaceArgs) (RaceResult, error) {
 	if err := args.Target.validate(); err != nil {
+		return RaceResult{}, WrapToolError("race", ErrInvalidRange, err.Error(), "")
+	}
+	if err := ensureModuleExists("race", p.resolveFS(), args.Module); err != nil {
 		return RaceResult{}, err
 	}
 	if err := ensureTLAPMBinary("race"); err != nil {
@@ -162,11 +168,15 @@ func (p *Prover) Race(ctx context.Context, args RaceArgs) (RaceResult, error) {
 		return RaceResult{}, err
 	}
 	methods := []string{"z3", "smt", "zenon", "auto", "blast", "force", "cvc4", "yices", "verit", "spass", "zipper", "ls4", "fail"}
-	return raceSolvers(ctx, args, methods)
+	result, err := raceSolvers(ctx, args, methods)
+	if ctx.Err() != nil {
+		return RaceResult{}, RequestContextError("race", ctx.Err())
+	}
+	return result, err
 }
 
 // buildProveCmd constructs the exec.Cmd for a prove invocation.
-func (p *Prover) buildProveCmd(args ProveArgs) (*exec.Cmd, error) {
+func (p *Prover) buildProveCmd(ctx context.Context, args ProveArgs) (*exec.Cmd, error) {
 	if err := args.Target.validate(); err != nil {
 		return nil, err
 	}
@@ -182,5 +192,5 @@ func (p *Prover) buildProveCmd(args ProveArgs) (*exec.Cmd, error) {
 	}
 	cmdArgs = append(cmdArgs, args.Module)
 
-	return exec.Command("tlapm", cmdArgs...), nil
+	return exec.CommandContext(ctx, "tlapm", cmdArgs...), nil
 }
