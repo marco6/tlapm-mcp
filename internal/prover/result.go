@@ -2,6 +2,7 @@ package prover
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -23,12 +24,12 @@ type Result struct {
 	Obligations      []Obligation       `json:"obligations,omitempty"`
 	ProofText        string             `json:"proof_text"`
 	FingerprintsUsed string             `json:"fingerprints_used"`
-	ErrorCode        string             `json:"error_code,omitempty"` // structured error code from tlapm
+	ErrorCode        string             `json:"error_code,omitempty"` // classification for incomplete or invalid TLAPM output
 }
 
 // Obligation is a single proof obligation with its status.
 type Obligation struct {
-	Line   int    `json:"line"`
+	Line   int    `json:"line,omitempty"`
 	Text   string `json:"text"`
 	Status string `json:"status"`
 	Error  string `json:"error,omitempty"`
@@ -42,11 +43,12 @@ type RaceResult struct {
 
 // RaceSolverResult is a single solver result in a race.
 type RaceSolverResult struct {
-	Solver            string  `json:"solver"`
-	Success           bool    `json:"success"`
-	TotalTimeSeconds  float64 `json:"total_time_seconds"`
-	ObligationsFailed int     `json:"obligations_failed"`
-	Error             string  `json:"error,omitempty"`
+	Solver           string  `json:"solver"`
+	Success          bool    `json:"success"`
+	TotalTimeSeconds float64 `json:"total_time_seconds"`
+	// -1 means TLAPM did not provide a trustworthy failed-obligation count.
+	ObligationsFailed int    `json:"obligations_failed"`
+	Error             string `json:"error,omitempty"`
 }
 
 // parseResult parses tlapm output into a Result.
@@ -60,20 +62,13 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 		Timing:           make(map[string]float64),
 	}
 
-	// Parse [INFO] / [ERROR] lines
 	infoRe := regexp.MustCompile(`^\[INFO\]:\s*(.*)`)
 	errorRe := regexp.MustCompile(`^\[ERROR\]:\s*(.*)`)
 
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-
-		if m := infoRe.FindStringSubmatch(line); m != nil {
-			if r.ProofText == "" {
-				r.ProofText = m[1]
-			}
-			if strings.Contains(m[1], "obligation proved") {
-				r.Success = true
-			}
+		if m := infoRe.FindStringSubmatch(line); m != nil && r.ProofText == "" {
+			r.ProofText = m[1]
 		}
 		if m := errorRe.FindStringSubmatch(line); m != nil {
 			r.Obligations = append(r.Obligations, Obligation{
@@ -83,6 +78,7 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 			})
 		}
 	}
+	r.Success = allObligationsProved(output) && len(r.Obligations) == 0
 
 	// Parse timing section
 	parseTiming(output, &r)
@@ -100,11 +96,27 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 		if strings.Contains(output, "corrupt") || strings.Contains(output, "invalid fingerprint") {
 			r.ErrorCode = string(ErrFingerprintCorrupted)
 		} else {
-			r.ErrorCode = string(ErrExitCode)
+			r.ErrorCode = string(ErrParse)
 		}
 	}
 
 	return r, nil
+}
+
+var proofCompletionRe = regexp.MustCompile(`^\[INFO\]:\s*All\s+\d+\s+obligations?\s+proved\.?$`)
+
+func allObligationsProved(output string) bool {
+	complete := false
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[ERROR]:") {
+			return false
+		}
+		if proofCompletionRe.MatchString(line) {
+			complete = true
+		}
+	}
+	return complete
 }
 
 // moduleName extracts the module name from a file path.
@@ -150,10 +162,13 @@ func parseTotalTime(output string) float64 {
 	return 0
 }
 
-// raceSolvers runs all solvers in parallel and returns sorted results.
-func raceSolvers(ctx context.Context, args RaceArgs, solvers []string) (RaceResult, error) {
+// raceSolvers runs all methods in parallel and returns sorted results.
+func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResult, error) {
 	if err := args.Target.validate(); err != nil {
 		return RaceResult{}, err
+	}
+	if args.Threads <= 0 {
+		return RaceResult{}, fmt.Errorf("threads must be a positive integer")
 	}
 	type result struct {
 		solver string
@@ -161,63 +176,55 @@ func raceSolvers(ctx context.Context, args RaceArgs, solvers []string) (RaceResu
 		err    error
 	}
 
-	results := make([]result, len(solvers))
+	results := make([]result, len(methods))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	// Limit parallelism
-	sem := make(chan struct{}, args.Threads)
+	parallelism := args.Threads
+	if parallelism > len(methods) {
+		parallelism = len(methods)
+	}
+	sem := make(chan struct{}, parallelism)
 
-	for i, solver := range solvers {
+	for i, method := range methods {
 		wg.Add(1)
-		go func(idx int, s string) {
+		go func(idx int, method string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
 			start := time.Now()
-			r := RaceSolverResult{Solver: s}
-
-			cmdArgs := []string{"--timing", "--solver", s}
-			cmdArgs = args.Target.appendCommandArgs(cmdArgs)
-			switch args.FPModes {
-			case FPNo:
-				cmdArgs = append(cmdArgs, "--nofp")
-			case FPCheck:
-				cmdArgs = append(cmdArgs, "--safefp")
-			case FPDefault:
-				// default: use cached (no extra flag needed)
-			}
-			cmdArgs = append(cmdArgs, args.Module)
+			r := RaceSolverResult{Solver: method, ObligationsFailed: -1}
+			cmdArgs := buildRaceCmdArgs(method, args)
 			cmd := exec.Command("tlapm", cmdArgs...)
 			out, err := cmd.CombinedOutput()
 			r.TotalTimeSeconds = time.Since(start).Seconds()
 
-			if err != nil {
-				r.Success = false
+			if errors.Is(err, exec.ErrNotFound) {
+				r.Error = fmt.Sprintf("tlapm binary not available: %v", err)
+			} else if err != nil {
 				r.Error = strings.TrimSpace(string(out))
-				// Distinguish solver-unavailable from proof-failure
-				if strings.Contains(err.Error(), "executable file not found") {
-					r.Error = fmt.Sprintf("solver %s not available: %v", s, err)
-					r.ObligationsFailed = -1 // sentinel: solver unavailable
-				} else if strings.Contains(strings.ToLower(r.Error), "corrupt") ||
+				if strings.Contains(strings.ToLower(r.Error), "corrupt") ||
 					strings.Contains(strings.ToLower(r.Error), "invalid fingerprint") {
-					r.Error = fmt.Sprintf("corrupted fingerprint for solver %s", s)
+					r.Error = fmt.Sprintf("corrupted fingerprint for method %s", method)
 				}
-			} else {
+			} else if allObligationsProved(string(out)) {
 				r.Success = true
+				r.ObligationsFailed = 0
+			} else {
+				r.Error = "TLAPM output did not confirm that all obligations were proved"
 			}
 
 			mu.Lock()
 			results[idx].res = r
 			mu.Unlock()
-		}(i, solver)
+		}(i, method)
 	}
 
 	wg.Wait()
 
 	// Build RaceResult with sorted results
-	r := RaceResult{Results: make([]RaceSolverResult, len(solvers))}
+	r := RaceResult{Results: make([]RaceSolverResult, len(methods))}
 	for i, res := range results {
 		r.Results[i] = res.res
 	}
@@ -243,4 +250,16 @@ func raceSolvers(ctx context.Context, args RaceArgs, solvers []string) (RaceResu
 	}
 
 	return r, nil
+}
+
+func buildRaceCmdArgs(method string, args RaceArgs) []string {
+	cmdArgs := []string{"--timing", "--method", method}
+	cmdArgs = args.Target.appendCommandArgs(cmdArgs)
+	switch args.FPModes {
+	case FPNo:
+		cmdArgs = append(cmdArgs, "--nofp")
+	case FPCheck:
+		cmdArgs = append(cmdArgs, "--safefp")
+	}
+	return append(cmdArgs, args.Module)
 }

@@ -241,7 +241,7 @@ func TestRace(t *testing.T) {
 	result, err := p.Race(ctx, RaceArgs{
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
-		FPModes: FPDefault,
+		FPModes: FPNo,
 		Threads: 4,
 	})
 	if err != nil {
