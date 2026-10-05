@@ -4,7 +4,6 @@ package prover
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -97,9 +96,7 @@ func (t LineTarget) appendCommandArgs(args []string) []string {
 type ProveArgs struct {
 	Module  string     // path to .tla file
 	Target  LineTarget // single source line or inclusive line range
-	Solver  string     // solver name (empty = tlapm default)
 	FPModes FPMode     // fingerprint mode (default: use cached)
-	Threads int        // worker threads
 }
 
 // RaceArgs holds the arguments for a race invocation.
@@ -107,7 +104,6 @@ type RaceArgs struct {
 	Module  string     // path to .tla file
 	Target  LineTarget // single source line or inclusive line range
 	FPModes FPMode     // fingerprint mode (default: use cached)
-	Threads int        // max parallel invocations
 }
 
 // Prove runs tlapm on the given module/target and parses the tool output.
@@ -151,9 +147,6 @@ func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
 
 // Race runs the supported TLAPM methods in parallel and returns sorted results.
 func (p *Prover) Race(ctx context.Context, args RaceArgs) (RaceResult, error) {
-	if args.Threads <= 0 {
-		return RaceResult{}, fmt.Errorf("threads must be a positive integer")
-	}
 	if err := args.Target.validate(); err != nil {
 		return RaceResult{}, err
 	}
@@ -172,13 +165,6 @@ func (p *Prover) buildProveCmd(args ProveArgs) (*exec.Cmd, error) {
 	}
 	cmdArgs := []string{"--timing"}
 	cmdArgs = args.Target.appendCommandArgs(cmdArgs)
-
-	if args.Solver != "" {
-		cmdArgs = append(cmdArgs, "--solver", args.Solver)
-	}
-	if args.Threads > 1 {
-		cmdArgs = append(cmdArgs, "--threads", strconv.Itoa(args.Threads))
-	}
 	switch args.FPModes {
 	case FPNo:
 		cmdArgs = append(cmdArgs, "--nofp")

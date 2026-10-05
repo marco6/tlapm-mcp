@@ -22,16 +22,7 @@ func ProveTool() *mcp.Tool {
 		"type":        "string",
 		"description": "Path to the TLA+ module file (absolute or relative to the server working directory).",
 	}
-	properties["solver"] = map[string]any{
-		"type":        "string",
-		"description": "SMT solver backend passed to tlapm --solver (for example, z3).",
-	}
-	properties["use_fingerprints"] = fingerprintModeProperty()
-	properties["threads"] = map[string]any{
-		"type":        "integer",
-		"minimum":     1,
-		"description": "Number of worker threads (positive integer).",
-	}
+	properties["cached"] = cachedProperty()
 	return &mcp.Tool{
 		Name:        "prove",
 		Description: "Prove one source line or an inclusive line range in a TLA+ module.",
@@ -80,26 +71,12 @@ func parseProveArgs(args map[string]any) (prover.ProveArgs, error) {
 		return prover.ProveArgs{}, err
 	}
 	pa := prover.ProveArgs{Module: module, Target: target, FPModes: prover.FPDefault}
-	if value, exists := args["solver"]; exists {
-		solver, ok := value.(string)
-		if !ok {
-			return prover.ProveArgs{}, fmt.Errorf("solver must be a string")
-		}
-		pa.Solver = solver
-	}
-	if value, exists := args["use_fingerprints"]; exists {
-		mode, err := parseFingerprintMode(value)
+	if value, exists := args["cached"]; exists {
+		mode, err := parseCached(value)
 		if err != nil {
 			return prover.ProveArgs{}, err
 		}
 		pa.FPModes = mode
-	}
-	if value, exists := args["threads"]; exists {
-		threads, err := positiveInteger(value, "threads")
-		if err != nil {
-			return prover.ProveArgs{}, err
-		}
-		pa.Threads = threads
 	}
 	return pa, nil
 }
@@ -115,12 +92,7 @@ func RaceTool() *mcp.Tool {
 		"type":        "string",
 		"description": "Path to the TLA+ module file (absolute or relative to the server working directory).",
 	}
-	properties["use_fingerprints"] = fingerprintModeProperty()
-	properties["threads"] = map[string]any{
-		"type":        "integer",
-		"minimum":     1,
-		"description": "Maximum parallel prover invocations (positive integer).",
-	}
+	properties["cached"] = cachedProperty()
 	return &mcp.Tool{
 		Name:        "race",
 		Description: "Try the supported TLAPM methods on one source line or an inclusive line range and return the fastest proved result.",
@@ -166,20 +138,13 @@ func parseRaceArgs(args map[string]any) (prover.RaceArgs, error) {
 	if err != nil {
 		return prover.RaceArgs{}, err
 	}
-	ra := prover.RaceArgs{Module: module, Target: target, FPModes: prover.FPDefault, Threads: 2}
-	if value, exists := args["use_fingerprints"]; exists {
-		mode, err := parseFingerprintMode(value)
+	ra := prover.RaceArgs{Module: module, Target: target, FPModes: prover.FPDefault}
+	if value, exists := args["cached"]; exists {
+		mode, err := parseCached(value)
 		if err != nil {
 			return prover.RaceArgs{}, err
 		}
 		ra.FPModes = mode
-	}
-	if value, exists := args["threads"]; exists {
-		threads, err := positiveInteger(value, "threads")
-		if err != nil {
-			return prover.RaceArgs{}, err
-		}
-		ra.Threads = threads
 	}
 	return ra, nil
 }
@@ -198,29 +163,22 @@ func toolErrorResult(err error) (*mcp.CallToolResult, error) {
 	}, nil
 }
 
-func fingerprintModeProperty() map[string]any {
+func cachedProperty() map[string]any {
 	return map[string]any{
-		"anyOf": []any{
-			map[string]any{"type": "boolean"},
-			map[string]any{"type": "string", "enum": []any{"check"}},
-		},
-		"description": "Fingerprint mode: true (use cache), false (no cache), or \"check\" (validate versions).",
+		"type":        "boolean",
+		"description": "Whether to use cached proof results (default: true).",
 	}
 }
 
-func parseFingerprintMode(value any) (prover.FPMode, error) {
-	switch mode := value.(type) {
-	case bool:
-		if !mode {
-			return prover.FPNo, nil
-		}
-		return prover.FPDefault, nil
-	case string:
-		if mode == "check" {
-			return prover.FPCheck, nil
-		}
+func parseCached(value any) (prover.FPMode, error) {
+	cached, ok := value.(bool)
+	if !ok {
+		return prover.FPDefault, fmt.Errorf("cached must be a boolean")
 	}
-	return prover.FPDefault, fmt.Errorf("use_fingerprints must be true, false, or \"check\"")
+	if !cached {
+		return prover.FPNo, nil
+	}
+	return prover.FPDefault, nil
 }
 
 func targetProperties() map[string]any {
@@ -230,15 +188,15 @@ func targetProperties() map[string]any {
 			"minimum":     1,
 			"description": "One source line; passed to tlapm as --line N.",
 		},
-		"range": map[string]any{
-			"type":        "object",
-			"description": "Inclusive source line range; passed to tlapm as --toolbox START END.",
-			"properties": map[string]any{
-				"start": map[string]any{"type": "integer", "minimum": 1},
-				"end":   map[string]any{"type": "integer", "minimum": 1},
-			},
-			"required":             []any{"start", "end"},
-			"additionalProperties": false,
+		"from": map[string]any{
+			"type":        "integer",
+			"minimum":     1,
+			"description": "First source line in an inclusive range; passed to tlapm as --toolbox FROM TO.",
+		},
+		"to": map[string]any{
+			"type":        "integer",
+			"minimum":     1,
+			"description": "Last source line in an inclusive range; passed to tlapm as --toolbox FROM TO.",
 		},
 	}
 }
@@ -247,10 +205,15 @@ func targetAlternatives() []any {
 	return []any{
 		map[string]any{
 			"required": []any{"line"},
-			"not":      map[string]any{"required": []any{"range"}},
+			"not": map[string]any{
+				"anyOf": []any{
+					map[string]any{"required": []any{"from"}},
+					map[string]any{"required": []any{"to"}},
+				},
+			},
 		},
 		map[string]any{
-			"required": []any{"range"},
+			"required": []any{"from", "to"},
 			"not":      map[string]any{"required": []any{"line"}},
 		},
 	}
@@ -258,33 +221,33 @@ func targetAlternatives() []any {
 
 func parseLineTarget(args map[string]any) (prover.LineTarget, error) {
 	lineValue, hasLine := args["line"]
-	rangeValue, hasRange := args["range"]
-	if hasLine == hasRange {
-		return prover.LineTarget{}, fmt.Errorf("provide exactly one of line or range")
-	}
+	fromValue, hasFrom := args["from"]
+	toValue, hasTo := args["to"]
 	if hasLine {
+		if hasFrom || hasTo {
+			return prover.LineTarget{}, fmt.Errorf("provide either line or from and to, not both")
+		}
 		line, err := positiveInteger(lineValue, "line")
 		if err != nil {
 			return prover.LineTarget{}, err
 		}
 		return prover.LineTarget{Line: line}, nil
 	}
-	rangeMap, ok := rangeValue.(map[string]any)
-	if !ok {
-		return prover.LineTarget{}, fmt.Errorf("range must contain start and end line numbers")
+	if !hasFrom || !hasTo {
+		return prover.LineTarget{}, fmt.Errorf("provide line or both from and to")
 	}
-	start, err := positiveInteger(rangeMap["start"], "range.start")
+	from, err := positiveInteger(fromValue, "from")
 	if err != nil {
 		return prover.LineTarget{}, err
 	}
-	end, err := positiveInteger(rangeMap["end"], "range.end")
+	to, err := positiveInteger(toValue, "to")
 	if err != nil {
 		return prover.LineTarget{}, err
 	}
-	if end < start {
-		return prover.LineTarget{}, fmt.Errorf("range.end must not be before range.start")
+	if to < from {
+		return prover.LineTarget{}, fmt.Errorf("to must not be before from")
 	}
-	return prover.LineTarget{Range: &prover.LineRange{Start: start, End: end}}, nil
+	return prover.LineTarget{Range: &prover.LineRange{Start: from, End: to}}, nil
 }
 
 func positiveInteger(value any, name string) (int, error) {

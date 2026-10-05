@@ -16,6 +16,10 @@ func testFile(t *testing.T, rel string) string {
 	return "testdata/" + rel
 }
 
+func proofObligationTarget() LineTarget {
+	return LineTarget{Range: &LineRange{Start: 6, End: 8}}
+}
+
 // integration fixture files.
 // hard_proofs.tla is a non-raft example with arithmetic theorems.
 // Taken from https://github.com/tlaplus/CommunityModules/ and abides to its MIT license terms.
@@ -60,25 +64,23 @@ func TestLineTargetCommandArgs(t *testing.T) {
 	}
 }
 
-func TestProve_NaturalNumbers(t *testing.T) {
+func TestProve_ArithmeticTheorem(t *testing.T) {
 	ctx := context.Background()
 	p := NewWithFS(testdataFS)
 
 	result, err := p.Prove(ctx, ProveArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Line: 28},
-		Solver:  "",
+		Module:  testFile(t, "arithmetic_theorem.tla"),
+		Target:  proofObligationTarget(),
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Prove error: %v", err)
 	}
 	if !result.Success {
-		t.Error("Expected success for hard_proofs (simple theorems)")
+		t.Error("Expected success for the selected theorem range")
 	}
-	if result.Module != "hard_proofs" {
-		t.Errorf("Module = %q, want %q", result.Module, "hard_proofs")
+	if result.Module != "arithmetic_theorem" {
+		t.Errorf("Module = %q, want %q", result.Module, "arithmetic_theorem")
 	}
 	if result.Timing == nil {
 		t.Error("Timing map should not be nil")
@@ -93,10 +95,9 @@ func TestProve_RangeTarget(t *testing.T) {
 	p := NewWithFS(testdataFS)
 
 	result, err := p.Prove(ctx, ProveArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Range: &LineRange{Start: 28, End: 34}},
+		Module:  testFile(t, "arithmetic_theorem.tla"),
+		Target:  proofObligationTarget(),
 		FPModes: FPNo,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Prove error: %v", err)
@@ -104,39 +105,24 @@ func TestProve_RangeTarget(t *testing.T) {
 	if !result.Success {
 		t.Error("Expected successful proof for the selected range")
 	}
-	if result.Range == nil || result.Range.Start != 28 || result.Range.End != 34 {
-		t.Errorf("Range = %+v, want inclusive lines 28..34", result.Range)
+	if result.Range == nil || result.Range.Start != 6 || result.Range.End != 8 {
+		t.Errorf("Range = %+v, want inclusive lines 6..8", result.Range)
 	}
 }
 
-func TestProve_WithSolver(t *testing.T) {
-	ctx := context.Background()
-	p := NewWithFS(testdataFS)
-
-	result, err := p.Prove(ctx, ProveArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Line: 28},
-		Solver:  "z3",
-		FPModes: FPDefault,
-		Threads: 1,
+func TestBuildProveCmdUsesTLAPMDefaults(t *testing.T) {
+	p := New()
+	cmd, err := p.buildProveCmd(ProveArgs{
+		Module: "Spec.tla",
+		Target: LineTarget{Line: 28},
 	})
 	if err != nil {
-		t.Fatalf("Prove error: %v", err)
+		t.Fatalf("buildProveCmd() error = %v", err)
 	}
-
-	if !result.Success {
-		t.Error("Expected success with z3")
+	want := []string{"--timing", "--line", "28", "Spec.tla"}
+	if !reflect.DeepEqual(cmd.Args[1:], want) {
+		t.Fatalf("prove args = %v, want %v", cmd.Args[1:], want)
 	}
-
-	if result.Solver != "z3" {
-		t.Errorf("Solver = %q, want %q", result.Solver, "z3")
-	}
-
-	if result.FingerprintsUsed != "use" {
-		t.Errorf("FingerprintsUsed = %q, want %q", result.FingerprintsUsed, "use")
-	}
-
-	t.Logf("Z3 prove: %fs", result.TotalTime)
 }
 
 func TestProve_WithoutFingerprints(t *testing.T) {
@@ -144,11 +130,9 @@ func TestProve_WithoutFingerprints(t *testing.T) {
 	p := NewWithFS(testdataFS)
 
 	result, err := p.Prove(ctx, ProveArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Line: 28},
-		Solver:  "",
+		Module:  testFile(t, "arithmetic_theorem.tla"),
+		Target:  proofObligationTarget(),
 		FPModes: FPNo,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Prove error: %v", err)
@@ -165,38 +149,14 @@ func TestProve_WithoutFingerprints(t *testing.T) {
 	t.Logf("No FP prove: %fs", result.TotalTime)
 }
 
-func TestProve_WithThreads(t *testing.T) {
-	ctx := context.Background()
-	p := NewWithFS(testdataFS)
-
-	result, err := p.Prove(ctx, ProveArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Line: 28},
-		Solver:  "",
-		FPModes: FPDefault,
-		Threads: 2,
-	})
-	if err != nil {
-		t.Fatalf("Prove error: %v", err)
-	}
-
-	if !result.Success {
-		t.Error("Expected success with threads=2")
-	}
-
-	t.Logf("Threaded prove: %fs", result.TotalTime)
-}
-
 func TestProve_WithFingerprintCheck(t *testing.T) {
 	ctx := context.Background()
 	p := NewWithFS(testdataFS)
 
 	result, err := p.Prove(ctx, ProveArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Line: 28},
-		Solver:  "",
+		Module:  testFile(t, "arithmetic_theorem.tla"),
+		Target:  proofObligationTarget(),
 		FPModes: FPCheck,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Prove error: %v", err)
@@ -220,9 +180,7 @@ func TestProve_ModuleNotFound(t *testing.T) {
 	_, err := p.Prove(ctx, ProveArgs{
 		Module:  "/tmp/does_not_exist.tla",
 		Target:  LineTarget{Line: 28},
-		Solver:  "",
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err == nil {
 		t.Fatal("Expected error for missing module file")
@@ -236,13 +194,12 @@ func TestProve_ModuleNotFound(t *testing.T) {
 
 func TestRace(t *testing.T) {
 	ctx := context.Background()
-	p := New()
+	p := NewWithFS(testdataFS)
 
 	result, err := p.Race(ctx, RaceArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Line: 28},
+		Module:  testFile(t, "arithmetic_theorem.tla"),
+		Target:  proofObligationTarget(),
 		FPModes: FPNo,
-		Threads: 4,
 	})
 	if err != nil {
 		t.Fatalf("Race error: %v", err)
@@ -272,7 +229,6 @@ func TestRace_AllFail(t *testing.T) {
 		Module:  testFile(t, "failing.tla"),
 		Target:  LineTarget{Line: 48},
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Race error: %v", err)
@@ -281,6 +237,9 @@ func TestRace_AllFail(t *testing.T) {
 	// failing.tla has FactorialGrows - verify race completes successfully
 	if result.Fastest.Solver == "" {
 		t.Error("Fastest solver should not be empty")
+	}
+	if result.Fastest.Success {
+		t.Error("Race reported success for a target with no proof obligations")
 	}
 
 	t.Logf("Fastest: %s (time: %fs), total results: %d",
@@ -295,7 +254,6 @@ func TestRace_NaturalNumbers(t *testing.T) {
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
 		FPModes: FPDefault,
-		Threads: 4,
 	})
 	if err != nil {
 		t.Fatalf("Race error: %v", err)
@@ -321,7 +279,6 @@ func TestRace_RangeTarget(t *testing.T) {
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Range: &LineRange{Start: 28, End: 34}},
 		FPModes: FPDefault,
-		Threads: 4,
 	})
 	if err != nil {
 		t.Fatalf("Race error: %v", err)
@@ -344,9 +301,7 @@ func TestIntegration_ProveRaceConsistency(t *testing.T) {
 	proveResult, err := p.Prove(ctx, ProveArgs{
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
-		Solver:  "",
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Prove error: %v", err)
@@ -357,7 +312,6 @@ func TestIntegration_ProveRaceConsistency(t *testing.T) {
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
 		FPModes: FPDefault,
-		Threads: 4,
 	})
 	if err != nil {
 		t.Fatalf("Race error: %v", err)
@@ -382,7 +336,6 @@ func TestIntegration_FingerprintsCache(t *testing.T) {
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("First prove error: %v", err)
@@ -393,7 +346,6 @@ func TestIntegration_FingerprintsCache(t *testing.T) {
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Second prove error: %v", err)
@@ -406,50 +358,31 @@ func TestIntegration_FingerprintsCache(t *testing.T) {
 	t.Logf("First prove: %fs, Second prove: %fs", result1.TotalTime, result2.TotalTime)
 }
 
-// TestIntegration_ProveWithNonExistentSolver exercises the failover path.
-func TestIntegration_ProveWithNonExistentSolver(t *testing.T) {
-	ctx := context.Background()
-	p := NewWithFS(testdataFS)
-
-	// z3 is likely not available, so prove should still work but report it
-	result, err := p.Prove(ctx, ProveArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Line: 28},
-		Solver:  "z3",
-		FPModes: FPDefault,
-		Threads: 1,
-	})
-	if err != nil {
-		// Check if it's a solver error, not a proof error
-		if code := DetectErrorClass(err); code != ErrSolverUnavailable {
-			t.Fatalf("Unexpected error: %v (code: %s)", err, code)
-		}
-	}
-
-	t.Logf("Prove with z3: success=%v, error=%v", result.Success, err)
-}
-
-// TestIntegration_FailingProof tests that failing proofs are correctly detected.
-func TestIntegration_FailingProof(t *testing.T) {
+// TestIntegration_ZeroObligationProof verifies an empty target is not reported as proved.
+func TestIntegration_ZeroObligationProof(t *testing.T) {
 	ctx := context.Background()
 	p := NewWithFS(testdataFS)
 
 	result, err := p.Prove(ctx, ProveArgs{
 		Module:  testFile(t, "failing.tla"),
 		Target:  LineTarget{Line: 48},
-		Solver:  "z3",
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Prove error: %v", err)
 	}
+	if result.Success {
+		t.Fatal("Prove reported success for a target with no proof obligations")
+	}
+	if result.ErrorCode != string(ErrNoObligations) {
+		t.Errorf("ErrorCode = %q, want %q", result.ErrorCode, ErrNoObligations)
+	}
 
-	t.Logf("Failing proof result: %+v, err: %v", result, err)
+	t.Logf("Zero-obligation proof result: %+v", result)
 }
 
-// TestIntegration_FailingRace tests that race correctly reports failed solvers.
-func TestIntegration_FailingRace(t *testing.T) {
+// TestIntegration_RaceZeroObligations verifies race rejects empty targets.
+func TestIntegration_RaceZeroObligations(t *testing.T) {
 	ctx := context.Background()
 	p := NewWithFS(testdataFS)
 
@@ -457,10 +390,14 @@ func TestIntegration_FailingRace(t *testing.T) {
 		Module:  testFile(t, "failing.tla"),
 		Target:  LineTarget{Line: 48},
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Race error: %v", err)
+	}
+	for _, result := range result.Results {
+		if result.Success {
+			t.Errorf("Race method %q reported success for a target with no proof obligations", result.Solver)
+		}
 	}
 
 	t.Logf("Fastest: %s (time: %fs), total results: %d",
@@ -476,7 +413,6 @@ func TestIntegration_FingerprintCachingOnHardProofs(t *testing.T) {
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("First prove error: %v", err)
@@ -486,7 +422,6 @@ func TestIntegration_FingerprintCachingOnHardProofs(t *testing.T) {
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Second prove error: %v", err)
@@ -504,9 +439,7 @@ func TestIntegration_ProveRaceConsistency_HardProofs(t *testing.T) {
 	proveResult, err := p.Prove(ctx, ProveArgs{
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
-		Solver:  "",
 		FPModes: FPDefault,
-		Threads: 1,
 	})
 	if err != nil {
 		t.Fatalf("Prove error: %v", err)
@@ -517,7 +450,6 @@ func TestIntegration_ProveRaceConsistency_HardProofs(t *testing.T) {
 		Module:  testFile(t, "hard_proofs.tla"),
 		Target:  LineTarget{Line: 28},
 		FPModes: FPDefault,
-		Threads: 4,
 	})
 	if err != nil {
 		t.Fatalf("Race error: %v", err)
@@ -530,50 +462,4 @@ func TestIntegration_ProveRaceConsistency_HardProofs(t *testing.T) {
 
 	t.Logf("Prove: success=%v, Race: fastest=%s (success=%v)",
 		proveResult.Success, raceResult.Fastest.Solver, raceResult.Fastest.Success)
-}
-
-// TestIntegration_ProveWithFingerprintCheck_HardProofs tests fingerprint check mode.
-func TestIntegration_ProveWithFingerprintCheck_HardProofs(t *testing.T) {
-	ctx := context.Background()
-	p := NewWithFS(testdataFS)
-
-	result, err := p.Prove(ctx, ProveArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Line: 28},
-		Solver:  "",
-		FPModes: FPCheck,
-		Threads: 1,
-	})
-	if err != nil {
-		t.Fatalf("Prove error: %v", err)
-	}
-
-	if result.FingerprintsUsed != "check" {
-		t.Errorf("FingerprintsUsed = %q, want %q", result.FingerprintsUsed, "check")
-	}
-
-	t.Logf("Fingerprint check: %fs", result.TotalTime)
-}
-
-// TestIntegration_ProveWithThreads_HardProofs tests threaded proving.
-func TestIntegration_ProveWithThreads_HardProofs(t *testing.T) {
-	ctx := context.Background()
-	p := NewWithFS(testdataFS)
-
-	result, err := p.Prove(ctx, ProveArgs{
-		Module:  testFile(t, "hard_proofs.tla"),
-		Target:  LineTarget{Line: 28},
-		Solver:  "",
-		FPModes: FPDefault,
-		Threads: 2,
-	})
-	if err != nil {
-		t.Fatalf("Prove error: %v", err)
-	}
-
-	if !result.Success {
-		t.Error("Expected success with threads=2")
-	}
-
-	t.Logf("Threaded prove: %fs", result.TotalTime)
 }

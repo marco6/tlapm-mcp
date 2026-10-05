@@ -4,44 +4,54 @@ An MCP server that wraps the [TLA⁺ Proof Manager (tlapm)](https://github.com/t
 
 ## Quick start
 
-Prove a specific source line, or an inclusive line range, in a TLA+ module:
+Requirements: Go 1.24+ and the `tlapm` executable available on `PATH`.
 
-- **Line 28** — runs `tlapm --line 28`.
-- **Lines 28–34** — runs `tlapm --toolbox 28 34`.
-- **Prove with solver `z3`** — selects Z3 as the SMT backend instead of the configured default.
-- **Prove without cache** — disables fingerprint/caching.
-- **Race methods** — tries the supported TLAPM methods in parallel and returns the fastest proved result, or the fastest failure if none proves the target.
+Build the server from the repository root:
 
-The MCP does not parse TLA+ source or resolve theorem paths. `module` accepts an absolute filesystem path or a path relative to the server working directory. The server passes the requested line or range directly to `tlapm` and parses only tool output.
+```bash
+go build -o tlapm-mcp ./cmd/tlapm-mcp/
+```
+
+Register it with an MCP client. For example, in OpenCode's `.opencode/config.jsonc`:
+
+```jsonc
+{
+  "mcpServers": {
+    "tlapm": {
+      "command": "/absolute/path/to/tlapm-mcp/tlapm-mcp",
+      "cwd": "/absolute/path/to/tlapm-mcp"
+    }
+  }
+}
+```
+
+Replace both paths with the repository location. Then ask the client: “Prove lines 6 through 8 of `testcases/arithmetic_theorem.tla`.” The server should report that 1 obligation was proved. See [MCP Tools](#mcp-tools) for request fields and response details.
 
 ## MCP Tools
 
 ### `prove`
 
-Prove one source line or an inclusive source line range. Provide exactly one of `line` or `range`.
+Prove one source line or an inclusive source line range. Provide either `line` or both `from` and `to`.
 
 ```jsonc
 {
   "module": "/path/to/Spec.tla",       // required: absolute or server-working-directory-relative module path
-  "line": 28,                           // one-based source line; alternatively use range
-  "solver": "z3",                      // optional: SMT backend passed to tlapm --solver
-  "use_fingerprints": true,             // optional: cache mode (default)
-  "threads": 1                          // optional: positive integer; one is the default
+  "line": 28,                           // one-based source line; alternatively use from and to
+  "cached": true                        // optional: use cached proof results (default)
 }
 ```
 
-`solver` selects the SMT backend and is passed to TLAPM as `--solver`. It does not select a proof method such as `smt`, `zenon`, or `blast`; omit it to use TLAPM's configured default.
-
-For a range, replace `line` with an inclusive `range` object:
+For an inclusive range, replace `line` with `from` and `to`:
 
 ```jsonc
 {
   "module": "/path/to/Spec.tla",       // absolute or server-working-directory-relative path
-  "range": { "start": 28, "end": 34 }
+  "from": 28,
+  "to": 34
 }
 ```
 
-Single lines use `--line N`; ranges use `--toolbox START END`.
+Single lines use `--line N`; ranges use `--toolbox FROM TO`.
 
 **Returns:**
 
@@ -50,7 +60,6 @@ Single lines use `--line N`; ranges use `--toolbox START END`.
   "success": true,
   "module": "Spec",
   "line": 28,                         // or "range": { "start": 28, "end": 34 }
-  "solver": "z3",
   "total_time_seconds": 0.234,
   "timing": { "interaction": 0.210 },
   "proof_text": "[INFO]: All 37 obligations proved.",
@@ -58,22 +67,21 @@ Single lines use `--line N`; ranges use `--toolbox START END`.
 }
 ```
 
-The server reports `success: true` only when `tlapm` exits successfully and emits an aggregate `[INFO]: All N obligations proved.` line. A message that only says an individual obligation was proved is not sufficient. `obligations` contains parsed `[ERROR]:` messages; source lines are not extracted by the current parser.
+The server reports `success: true` only when `tlapm` exits successfully and emits an aggregate `[INFO]: All N obligations proved.` line with `N > 0`. A zero-obligation summary is returned as `success: false` with `error_code: "NO_OBLIGATIONS"`; it does not confirm that the selected target was proved. A message that only says an individual obligation was proved is not sufficient. `obligations` contains parsed `[ERROR]:` messages; source lines are not extracted by the current parser.
 
 ### `race`
 
-Try each method in the fixed method list documented below on one source line or an inclusive line range. Each candidate is passed to TLAPM with `--method`; calls run in parallel up to `threads`, and each method reports its own result, including unavailable methods.
+Try each method in the fixed method list documented below on one source line or an inclusive line range. Each candidate is passed to TLAPM with `--method`; at most two calls run in parallel, and each method reports its own result, including unavailable methods. An explicit `BY` method in the TLA⁺ proof takes precedence over this default, so `race` only compares candidates for obligations without an explicit proof method.
 
 ```jsonc
 {
   "module": "/path/to/Spec.tla",
-  "line": 28,                           // alternatively: "range": { "start": 28, "end": 34 }
-  "use_fingerprints": true,
-  "threads": 2                          // positive integer; max parallel prover invocations
+  "line": 28,                           // alternatively use "from": 28, "to": 34
+  "cached": true
 }
 ```
 
-`line` is passed as `--line N`; `range` is passed as `--toolbox START END`.
+`line` is passed as `--line N`; `from` and `to` are passed as `--toolbox FROM TO`.
 
 **Returns:**
 
@@ -98,15 +106,15 @@ The response keeps `solver` as the result-field name for compatibility; its valu
 
 ## Line and range targeting
 
-Targets are one-based source line numbers, not theorem names or proof-step paths. Supply exactly one target:
+Targets are one-based source line numbers, not theorem names or proof-step paths. Supply exactly one target form:
 
 ```jsonc
 { "module": "Spec.tla", "line": 35 }
-{ "module": "Spec.tla", "range": { "start": 35, "end": 42 } }
+{ "module": "Spec.tla", "from": 35, "to": 42 }
 ```
 
 - `line` selects one source line and becomes `tlapm --line N`.
-- `range` selects inclusive start/end lines and becomes `tlapm --toolbox START END`.
+- `from` and `to` select an inclusive range and become `tlapm --toolbox FROM TO`.
 
 Absolute module paths and paths relative to the server working directory are accepted. The MCP does not inspect module contents; `tlapm` interprets the source and target.
 
@@ -127,13 +135,12 @@ Absolute module paths and paths relative to the server working directory are acc
 | `ls4` | LS4 temporal logic decision procedure |
 | `fail` | Dummy — always fails (useful for testing) |
 
-## Fingerprint / Cache Control
+## Cached Results
 
-tlapm caches proof results in fingerprint files (`.tlacache/`). The server honors these by default:
+tlapm caches proof results in fingerprint files (`.tlacache/`). Cached results are used by default:
 
-- **`use_fingerprints: true`** (default) — loads cached results; skips proven obligations.
-- **`use_fingerprints: false`** — ignores existing fingerprints, recomputes. Useful after definition changes.
-- **`use_fingerprints: "check"`** — loads fingerprints but validates tlapm/zenon/Isabelle versions (`--safefp`).
+- **`cached: true`** (default) — uses cached results and skips proven obligations.
+- **`cached: false`** — ignores existing cached results and recomputes, useful after definition changes.
 
 ## Failing over to a model-readable error
 
@@ -142,23 +149,11 @@ The `obligations` array contains messages parsed from `[ERROR]:` output lines. T
 ## Example interactions
 
 ```
-> Prove the theorem beginning on line 28 in `hard_proofs.tla`.
+> Prove lines 6 through 8 of `testcases/arithmetic_theorem.tla`.
 
-< {"module": "hard_proofs.tla", "line": 28, "solver": "z3", "use_fingerprints": true}
+< {"module": "testcases/arithmetic_theorem.tla", "from": 6, "to": 8}
 
-< {"success": true, "module": "hard_proofs", "line": 28, "solver": "z3", "total_time_seconds": 0.019}
-
-> Prove source lines 28 through 34 without cache.
-
-< {"module": "hard_proofs.tla", "range": {"start": 28, "end": 34}, "use_fingerprints": false}
-
-< {"success": true, "module": "hard_proofs", "range": {"start": 28, "end": 34}, "solver": "smt", "total_time_seconds": 0.018}
-
-> Race all provers on line 28 of `hard_proofs.tla`.
-
-< {"module": "hard_proofs.tla", "line": 28, "use_fingerprints": true}
-
-< {"fastest": {"solver": "smt", "success": true, "total_time_seconds": 0.087}, "results": [ ... ]}
+< {"success": true, "module": "arithmetic_theorem", "range": {"start": 6, "end": 8}, "proof_text": "All 1 obligation proved."}
 ```
 
 ## Build & Editor Setup
@@ -169,14 +164,14 @@ The `obligations` array contains messages parsed from `[ERROR]:` output lines. T
 # Ensure Go 1.24+ is available
 go version
 
-# Build the binary (outputs to ./bin/tlapm-mcp)
-go build -o bin/tlapm-mcp ./cmd/tlapm-mcp/
+# Build the binary at the repository root
+go build -o tlapm-mcp ./cmd/tlapm-mcp/
 
 # Or run directly without building
 go run ./cmd/tlapm-mcp/
 ```
 
-The binary communicates over MCP stdio as a long-lived process. Every `prove` and `race` call requires exactly one of `line` or inclusive `range`; solver selection and fingerprinting remain per-command options.
+The binary communicates over MCP stdio as a long-lived process. Every `prove` and `race` call requires exactly one of `line` or inclusive `from`/`to`; proof method selection belongs in the module's `BY` clause.
 
 ### Opencode
 
@@ -201,20 +196,21 @@ Or with the compiled binary:
 {
   "mcpServers": {
     "tlapm": {
-      "command": "/path/to/tlapm-mcp/bin/tlapm-mcp"
+      "command": "/path/to/tlapm-mcp/tlapm-mcp",
+      "cwd": "/path/to/tlapm-mcp"
     }
   }
 }
 ```
 
-The caller provides exactly one of `line` or `range` in each `prove` / `race` tool call:
+The caller provides exactly one of `line` or inclusive `from`/`to` in each `prove` / `race` tool call:
 
 ```jsonc
 // One line -> tlapm --line N
-{ "module": "Spec.tla", "line": 35, "solver": "z3", "use_fingerprints": false }
+{ "module": "Spec.tla", "line": 35, "cached": false }
 
-// Inclusive range -> tlapm --toolbox START END
-{ "module": "Spec.tla", "range": { "start": 35, "end": 42 } }
+// Inclusive range -> tlapm --toolbox FROM TO
+{ "module": "Spec.tla", "from": 35, "to": 42 }
 ```
 
 ### OMP (Oh My Pi)

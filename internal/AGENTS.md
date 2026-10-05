@@ -28,8 +28,8 @@ flowchart LR
 # Directory
 
 - `server/` - MCP server setup: creates server instance, registers tools, manages the prover.
-- `rpc/` - `prove` and `race` tool schemas, handlers, and argument parsing for line/range targets.
-- `prover/` - tlapm invocation, output parsing, fingerprinting, and line/range flag construction; module contents are not read or parsed.
+- `rpc/` - `prove` and `race` tool schemas, handlers, and argument parsing for line or flattened `from`/`to` targets.
+- `prover/` - tlapm invocation, output parsing, fingerprint caching, and line/range flag construction; module contents are not read or parsed.
 
 
 # Documents
