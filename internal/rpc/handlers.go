@@ -20,20 +20,17 @@ func ProveTool() *mcp.Tool {
 	properties := targetProperties()
 	properties["module"] = map[string]any{
 		"type":        "string",
-		"description": "Path to the TLA+ module file.",
+		"description": "Path to the TLA+ module file (absolute or relative to the server working directory).",
 	}
 	properties["solver"] = map[string]any{
 		"type":        "string",
-		"description": "Solver to use (e.g. z3, smt, zenon).",
+		"description": "SMT solver backend passed to tlapm --solver (for example, z3).",
 	}
-	properties["use_fingerprints"] = map[string]any{
-		"type":        "union",
-		"types":       []any{"boolean", "string"},
-		"description": "Fingerprint mode: true (use cache), false (no cache), or \"check\" (validate versions).",
-	}
+	properties["use_fingerprints"] = fingerprintModeProperty()
 	properties["threads"] = map[string]any{
 		"type":        "integer",
-		"description": "Number of worker threads.",
+		"minimum":     1,
+		"description": "Number of worker threads (positive integer).",
 	}
 	return &mcp.Tool{
 		Name:        "prove",
@@ -60,18 +57,7 @@ func ProveHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolR
 		}
 		result, err := p.Prove(ctx, pa)
 		if err != nil {
-			if tErr, ok := err.(*prover.TLAPMError); ok {
-				result.ErrorCode = string(tErr.Code)
-				result.ProofText = tErr.Message
-				data, marshalErr := json.Marshal(result)
-				if marshalErr != nil {
-					return nil, marshalErr
-				}
-				return &mcp.CallToolResult{
-					Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
-				}, tErr
-			}
-			return nil, err
+			return toolErrorResult(err)
 		}
 		data, err := json.Marshal(result)
 		if err != nil {
@@ -94,26 +80,26 @@ func parseProveArgs(args map[string]any) (prover.ProveArgs, error) {
 		return prover.ProveArgs{}, err
 	}
 	pa := prover.ProveArgs{Module: module, Target: target, FPModes: prover.FPDefault}
-
-	if v, ok := args["solver"].(string); ok {
-		pa.Solver = v
-	}
-	if v, ok := args["use_fingerprints"].(bool); ok {
-		if !v {
-			pa.FPModes = prover.FPNo
+	if value, exists := args["solver"]; exists {
+		solver, ok := value.(string)
+		if !ok {
+			return prover.ProveArgs{}, fmt.Errorf("solver must be a string")
 		}
-	} else if v, ok := args["use_fingerprints"].(string); ok {
-		switch v {
-		case "check":
-			pa.FPModes = prover.FPCheck
-		case "no", "false":
-			pa.FPModes = prover.FPNo
-		default:
-			pa.FPModes = prover.FPDefault
-		}
+		pa.Solver = solver
 	}
-	if v, ok := args["threads"].(float64); ok {
-		pa.Threads = int(v)
+	if value, exists := args["use_fingerprints"]; exists {
+		mode, err := parseFingerprintMode(value)
+		if err != nil {
+			return prover.ProveArgs{}, err
+		}
+		pa.FPModes = mode
+	}
+	if value, exists := args["threads"]; exists {
+		threads, err := positiveInteger(value, "threads")
+		if err != nil {
+			return prover.ProveArgs{}, err
+		}
+		pa.Threads = threads
 	}
 	return pa, nil
 }
@@ -127,20 +113,17 @@ func RaceTool() *mcp.Tool {
 	properties := targetProperties()
 	properties["module"] = map[string]any{
 		"type":        "string",
-		"description": "Path to the TLA+ module file.",
+		"description": "Path to the TLA+ module file (absolute or relative to the server working directory).",
 	}
-	properties["use_fingerprints"] = map[string]any{
-		"type":        "union",
-		"types":       []any{"boolean", "string"},
-		"description": "Fingerprint mode: true (use cache), false (no cache), or \"check\" (validate versions).",
-	}
+	properties["use_fingerprints"] = fingerprintModeProperty()
 	properties["threads"] = map[string]any{
 		"type":        "integer",
-		"description": "Max parallel prover invocations.",
+		"minimum":     1,
+		"description": "Maximum parallel prover invocations (positive integer).",
 	}
 	return &mcp.Tool{
 		Name:        "race",
-		Description: "Race all available provers on one source line or an inclusive line range and return the fastest success.",
+		Description: "Try the supported TLAPM methods on one source line or an inclusive line range and return the fastest proved result.",
 		InputSchema: map[string]any{
 			"type":       "object",
 			"properties": properties,
@@ -163,7 +146,7 @@ func RaceHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRe
 		}
 		result, err := p.Race(ctx, ra)
 		if err != nil {
-			return nil, err
+			return toolErrorResult(err)
 		}
 		data, err := json.Marshal(result)
 		if err != nil {
@@ -184,24 +167,60 @@ func parseRaceArgs(args map[string]any) (prover.RaceArgs, error) {
 		return prover.RaceArgs{}, err
 	}
 	ra := prover.RaceArgs{Module: module, Target: target, FPModes: prover.FPDefault, Threads: 2}
-	if v, ok := args["use_fingerprints"].(bool); ok {
-		if !v {
-			ra.FPModes = prover.FPNo
+	if value, exists := args["use_fingerprints"]; exists {
+		mode, err := parseFingerprintMode(value)
+		if err != nil {
+			return prover.RaceArgs{}, err
 		}
-	} else if v, ok := args["use_fingerprints"].(string); ok {
-		switch v {
-		case "check":
-			ra.FPModes = prover.FPCheck
-		case "no", "false":
-			ra.FPModes = prover.FPNo
-		default:
-			ra.FPModes = prover.FPDefault
-		}
+		ra.FPModes = mode
 	}
-	if v, ok := args["threads"].(float64); ok {
-		ra.Threads = int(v)
+	if value, exists := args["threads"]; exists {
+		threads, err := positiveInteger(value, "threads")
+		if err != nil {
+			return prover.RaceArgs{}, err
+		}
+		ra.Threads = threads
 	}
 	return ra, nil
+}
+func toolErrorResult(err error) (*mcp.CallToolResult, error) {
+	tErr, ok := err.(*prover.TLAPMError)
+	if !ok {
+		return nil, err
+	}
+	data, marshalErr := json.Marshal(tErr.ToMap())
+	if marshalErr != nil {
+		return nil, marshalErr
+	}
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+		IsError: true,
+	}, nil
+}
+
+func fingerprintModeProperty() map[string]any {
+	return map[string]any{
+		"anyOf": []any{
+			map[string]any{"type": "boolean"},
+			map[string]any{"type": "string", "enum": []any{"check"}},
+		},
+		"description": "Fingerprint mode: true (use cache), false (no cache), or \"check\" (validate versions).",
+	}
+}
+
+func parseFingerprintMode(value any) (prover.FPMode, error) {
+	switch mode := value.(type) {
+	case bool:
+		if !mode {
+			return prover.FPNo, nil
+		}
+		return prover.FPDefault, nil
+	case string:
+		if mode == "check" {
+			return prover.FPCheck, nil
+		}
+	}
+	return prover.FPDefault, fmt.Errorf("use_fingerprints must be true, false, or \"check\"")
 }
 
 func targetProperties() map[string]any {

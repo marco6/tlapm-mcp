@@ -4,6 +4,7 @@ package prover
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -118,18 +119,50 @@ func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
 	if err := EnsureModuleExists(p.resolveFS(), args.Module); err != nil {
 		return Result{}, err
 	}
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		tlapmErr := ParseExitCodeError("prove", output, err)
-		LogError("prove", tlapmErr)
+	if err := ensureTLAPMBinary("prove"); err != nil {
+		LogError("prove", err)
+		return Result{}, err
 	}
-	return parseResult(string(output), args)
+
+	output, commandErr := cmd.CombinedOutput()
+	var toolErr error
+	if commandErr != nil {
+		toolErr = ParseExitCodeError("prove", output, commandErr)
+		LogError("prove", toolErr)
+		if tErr, ok := toolErr.(*TLAPMError); ok && tErr.Code == ErrTLAPMNotFound {
+			return Result{}, toolErr
+		}
+	}
+
+	result, err := parseResult(string(output), args)
+	if err != nil {
+		return Result{}, err
+	}
+	if commandErr != nil {
+		result.Success = false
+		if tErr, ok := toolErr.(*TLAPMError); ok {
+			result.ErrorCode = string(tErr.Code)
+		} else {
+			result.ErrorCode = string(ErrExitCode)
+		}
+	}
+	return result, nil
 }
 
-// Race runs all available solvers in parallel and returns sorted results.
+// Race runs the supported TLAPM methods in parallel and returns sorted results.
 func (p *Prover) Race(ctx context.Context, args RaceArgs) (RaceResult, error) {
-	solvers := []string{"z3", "smt", "zenon", "auto", "blast", "force", "cvc4", "yices", "verit", "spass", "zipper", "ls4", "fail"}
-	return raceSolvers(ctx, args, solvers)
+	if args.Threads <= 0 {
+		return RaceResult{}, fmt.Errorf("threads must be a positive integer")
+	}
+	if err := args.Target.validate(); err != nil {
+		return RaceResult{}, err
+	}
+	if err := ensureTLAPMBinary("race"); err != nil {
+		LogError("race", err)
+		return RaceResult{}, err
+	}
+	methods := []string{"z3", "smt", "zenon", "auto", "blast", "force", "cvc4", "yices", "verit", "spass", "zipper", "ls4", "fail"}
+	return raceSolvers(ctx, args, methods)
 }
 
 // buildProveCmd constructs the exec.Cmd for a prove invocation.

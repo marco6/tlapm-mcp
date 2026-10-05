@@ -1,10 +1,13 @@
 package prover
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -32,10 +35,10 @@ const (
 
 // TLAPMError is a structured error with context.
 type TLAPMError struct {
-	Tool    string     `json:"tool,omitempty"`    // which MCP tool triggered this
-	Code    ErrCode    `json:"code"`              // error category
-	Message string     `json:"message"`           // human-readable message
-	Details string     `json:"details,omitempty"` // extra context (e.g., file path, solver name)
+	Tool    string  `json:"tool,omitempty"`    // which MCP tool triggered this
+	Code    ErrCode `json:"code"`              // error category
+	Message string  `json:"message"`           // human-readable message
+	Details string  `json:"details,omitempty"` // extra context (e.g., file path, solver name)
 }
 
 // Error implements the error interface.
@@ -119,45 +122,38 @@ func ParseExitCodeError(tool string, output []byte, err error) error {
 	if err == nil {
 		return nil
 	}
+	if errors.Is(err, exec.ErrNotFound) {
+		return WrapToolError(tool, ErrTLAPMNotFound, "tlapm binary not found", err.Error())
+	}
 
-	// Check for specific error messages in the tlapm output
 	outputStr := string(output)
 	if strings.Contains(outputStr, "Fingerprint") &&
 		(strings.Contains(outputStr, "corrupt") || strings.Contains(outputStr, "invalid")) {
 		return WrapToolError(tool, ErrFingerprintCorrupted,
 			"corrupted fingerprint file", outputStr)
 	}
-
-	if strings.Contains(outputStr, "solver") &&
-		strings.Contains(outputStr, "not available") {
-		return WrapToolError(tool, ErrSolverUnavailable,
-			"solver not available", outputStr)
+	if strings.Contains(outputStr, "solver") && strings.Contains(outputStr, "not available") {
+		return WrapToolError(tool, ErrSolverUnavailable, "solver not available", outputStr)
 	}
-
-	return WrapError(tool, ErrExitCode,
-		fmt.Sprintf("tlapm exited with code %v", err),
-		err)
+	return WrapError(tool, ErrExitCode, fmt.Sprintf("tlapm exited with code %v", err), err)
 }
 
-// LogError writes a structured error to the error stream.
-// In MCP stdio mode, errors are logged to stderr as JSON for the client to read.
+// LogError writes a JSON diagnostic to stderr; stderr is not MCP protocol output.
 func LogError(tool string, err error) {
 	if err == nil {
 		return
 	}
-	var msg string
-	var code string
+	var diagnostic map[string]any
 	if tErr, ok := err.(*TLAPMError); ok {
-		msg = tErr.Message
-		code = string(tErr.Code)
+		diagnostic = tErr.ToMap()
 	} else {
-		msg = err.Error()
-		code = string(DetectErrorClass(err))
+		diagnostic = map[string]any{
+			"tool":    tool,
+			"code":    string(DetectErrorClass(err)),
+			"message": err.Error(),
+		}
 	}
-
-	// Log to stderr in a format that MCP clients can consume
-	fmt.Fprintf(os.Stderr, "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/error\",\"params\":{\"tool\":\"%s\",\"code\":\"%s\",\"message\":\"%s\"}}\n",
-		tool, code, msg)
+	_ = json.NewEncoder(os.Stderr).Encode(diagnostic)
 }
 
 // parseObligationErrors extracts error details from tlapm output lines.
@@ -202,39 +198,31 @@ func isNotFoundError(err error) bool {
 }
 
 // ensureTLAPMBinary checks that the tlapm binary is available on PATH.
-func ensureTLAPMBinary() error {
-	_, err := exec.LookPath("tlapm")
-	if err != nil {
-		return WrapToolError("prove", ErrTLAPMNotFound,
-			"tlapm binary not found", err.Error())
+func ensureTLAPMBinary(tool string) error {
+	if _, err := exec.LookPath("tlapm"); err != nil {
+		return WrapToolError(tool, ErrTLAPMNotFound, "tlapm binary not found", err.Error())
 	}
 	return nil
 }
 
-// EnsureModuleExists checks that the module file exists and is readable.
+// EnsureModuleExists checks a module path against the supplied filesystem or the OS for absolute paths.
 func EnsureModuleExists(fsys fs.FS, modulePath string) error {
-	_, err := fs.Stat(fsys, modulePath)
+	var err error
+	if filepath.IsAbs(modulePath) {
+		_, err = os.Stat(modulePath)
+	} else {
+		_, err = fs.Stat(fsys, modulePath)
+	}
 	if err != nil {
 		if osIsNotExist(err) {
-			return WrapToolError("prove", ErrModuleNotFound,
-				"module file not found", modulePath)
+			return WrapToolError("prove", ErrModuleNotFound, "module file not found", modulePath)
 		}
-		return WrapError("prove", ErrIO,
-			"cannot read module file", err)
+		return WrapError("prove", ErrIO, "cannot read module file", err)
 	}
 	return nil
 }
 
-// osIsNotExist checks if an error is a "no such file or directory" error.
-// It handles both os.PathError and fs.PathError wrapped errors.
+// osIsNotExist checks if the underlying path error represents a missing file.
 func osIsNotExist(err error) bool {
-	if err == nil {
-		return false
-	}
-	if os.IsNotExist(err) {
-		return true
-	}
-	msg := err.Error()
-	// Handle fs.PathError from fs.Stat with "invalid argument"
-	return strings.Contains(msg, "invalid argument")
+	return err != nil && os.IsNotExist(err)
 }

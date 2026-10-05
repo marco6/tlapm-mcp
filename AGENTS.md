@@ -22,7 +22,6 @@ tlapm-mcp exposes two tools, `prove` and `race`. Both accept one source line or 
 
 - `cmd/` - Binary entry point for the MCP server.
 - `internal/` - Core internal packages: server setup, RPC handlers, and prover logic.
-- `examples/` - TLA⁺ example modules (both raft and non-raft).
 - `testcases/` - Copy of testdata for manual testing.
 - `go.mod` - Go module definition.
 - `go.sum` - Go dependency checksums.
@@ -39,5 +38,3 @@ tlapm-mcp exposes two tools, `prove` and `race`. Both accept one source line or 
 - `internal/server/AGENTS.md` - MCP server setup.
 - `internal/rpc/AGENTS.md` - Tool handlers and definitions.
 - `internal/prover/AGENTS.md` - TLA⁺ prover orchestration.
-- `examples/AGENTS.md` - Example TLA⁺ modules.
-
