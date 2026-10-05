@@ -3,6 +3,8 @@ package prover
 import (
 	"context"
 	"embed"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -88,6 +90,12 @@ func TestProve_ArithmeticTheorem(t *testing.T) {
 	if result.TotalTime <= 0 {
 		t.Errorf("TotalTime = %f, want > 0", result.TotalTime)
 	}
+	if result.ObligationCount == nil || *result.ObligationCount != 1 {
+		t.Errorf("ObligationCount = %v, want 1", result.ObligationCount)
+	}
+	if len(result.Obligations) != 0 {
+		t.Errorf("successful proof returned unresolved obligations: %#v", result.Obligations)
+	}
 }
 
 func TestProve_RangeTarget(t *testing.T) {
@@ -110,9 +118,45 @@ func TestProve_RangeTarget(t *testing.T) {
 	}
 }
 
+func TestProve_FailedProofReturnsCompactObligation(t *testing.T) {
+	module := filepath.Join(t.TempDir(), "Unprovable.tla")
+	source := "---- MODULE Unprovable ----\nNope == FALSE\nTHEOREM T == Nope\nBY DEF Nope\n====\n"
+	if err := os.WriteFile(module, []byte(source), 0o600); err != nil {
+		t.Fatalf("write module: %v", err)
+	}
+
+	result, err := New().Prove(context.Background(), ProveArgs{
+		Module:  module,
+		Target:  LineTarget{Range: &LineRange{Start: 1, End: 5}},
+		FPModes: FPNo,
+	})
+	if err != nil {
+		t.Fatalf("Prove() error = %v", err)
+	}
+	if result.Success {
+		t.Fatal("Prove() succeeded for an unprovable theorem")
+	}
+	if result.ErrorCode != string(ErrProofFailed) {
+		t.Errorf("ErrorCode = %q, want %q", result.ErrorCode, ErrProofFailed)
+	}
+	if result.ObligationCount == nil || *result.ObligationCount != 1 {
+		t.Fatalf("ObligationCount = %v, want 1", result.ObligationCount)
+	}
+	if len(result.Obligations) != 1 {
+		t.Fatalf("Obligations = %#v, want one obligation", result.Obligations)
+	}
+	obligation := result.Obligations[0]
+	if obligation.Line != 4 || obligation.Status != "failed" {
+		t.Errorf("obligation = %+v, want failed status at line 4", obligation)
+	}
+	if obligation.FailureReason == "" {
+		t.Errorf("obligation is missing failure reason: %+v", obligation)
+	}
+}
+
 func TestBuildProveCmdUsesTLAPMDefaults(t *testing.T) {
 	p := New()
-	cmd, err := p.buildProveCmd(ProveArgs{
+	cmd, err := p.buildProveCmd(context.Background(), ProveArgs{
 		Module: "Spec.tla",
 		Target: LineTarget{Line: 28},
 	})
@@ -216,7 +260,9 @@ func TestRace(t *testing.T) {
 	if !result.Fastest.Success {
 		t.Error("Fastest solver should have succeeded")
 	}
-
+	if result.ObligationCount == nil || *result.ObligationCount == 0 {
+		t.Errorf("ObligationCount = %v, want a positive count", result.ObligationCount)
+	}
 	t.Logf("Fastest: %s (time: %fs), total results: %d",
 		result.Fastest.Solver, result.Fastest.TotalTimeSeconds, len(result.Results))
 }

@@ -20,34 +20,30 @@ type Result struct {
 	Range            *LineRange         `json:"range,omitempty"`
 	TotalTime        float64            `json:"total_time_seconds"`
 	Timing           map[string]float64 `json:"timing"`
+	ObligationCount  *int               `json:"obligation_count,omitempty"`
 	Obligations      []Obligation       `json:"obligations,omitempty"`
 	ProofText        string             `json:"proof_text"`
 	FingerprintsUsed string             `json:"fingerprints_used"`
 	ErrorCode        string             `json:"error_code,omitempty"` // classification for incomplete or invalid TLAPM output
 }
 
-// Obligation is a single proof obligation with its status.
-type Obligation struct {
-	Line   int    `json:"line,omitempty"`
-	Text   string `json:"text"`
-	Status string `json:"status"`
-	Error  string `json:"error,omitempty"`
-}
-
 // RaceResult is the structured output of a race invocation.
 type RaceResult struct {
-	Fastest RaceSolverResult   `json:"fastest"`
-	Results []RaceSolverResult `json:"results"`
+	Fastest         RaceSolverResult   `json:"fastest"`
+	Results         []RaceSolverResult `json:"results"`
+	ObligationCount *int               `json:"obligation_count,omitempty"`
 }
 
 // RaceSolverResult is a single solver result in a race.
 type RaceSolverResult struct {
-	Solver           string  `json:"solver"`
-	Success          bool    `json:"success"`
-	TotalTimeSeconds float64 `json:"total_time_seconds"`
+	Solver           string       `json:"solver"`
+	Success          bool         `json:"success"`
+	TotalTimeSeconds float64      `json:"total_time_seconds"`
+	Obligations      []Obligation `json:"obligations,omitempty"`
 	// -1 means TLAPM did not provide a trustworthy failed-obligation count.
 	ObligationsFailed int    `json:"obligations_failed"`
 	Error             string `json:"error,omitempty"`
+	ErrorCode         string `json:"error_code,omitempty"`
 }
 
 // parseResult parses tlapm output into a Result.
@@ -59,24 +55,28 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 		FingerprintsUsed: args.FPModes.String(),
 		Timing:           make(map[string]float64),
 	}
+	r.Obligations, r.ObligationCount = parseToolboxObligations(output)
+	if r.ObligationCount == nil {
+		if count, found := completedObligationCount(output); found {
+			r.ObligationCount = &count
+		}
+	}
 
 	infoRe := regexp.MustCompile(`^\[INFO\]:\s*(.*)`)
-	errorRe := regexp.MustCompile(`^\[ERROR\]:\s*(.*)`)
 
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
 		if m := infoRe.FindStringSubmatch(line); m != nil && r.ProofText == "" {
 			r.ProofText = m[1]
 		}
-		if m := errorRe.FindStringSubmatch(line); m != nil {
-			r.Obligations = append(r.Obligations, Obligation{
-				Text:   m[1],
-				Status: "failed",
-				Error:  m[1],
-			})
-		}
 	}
-	r.Success = allObligationsProved(output) && len(r.Obligations) == 0
+	r.Success = allObligationsProved(output) && len(parseObligationErrors(output)) == 0
+	finalizeObligations(r.Obligations, r.Success, strings.Join(parseObligationErrors(output), "; "))
+	if r.ObligationCount == nil && hasStructuredObligations(r.Obligations) {
+		count := len(r.Obligations)
+		r.ObligationCount = &count
+	}
+	r.Obligations = unresolvedObligations(r.Obligations)
 
 	// Parse timing section
 	parseTiming(output, &r)
@@ -91,14 +91,7 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 
 	// Set error code based on success state and output content
 	if !r.Success {
-		switch {
-		case strings.Contains(output, "corrupt") || strings.Contains(output, "invalid fingerprint"):
-			r.ErrorCode = string(ErrFingerprintCorrupted)
-		case hasZeroObligationCompletion(output):
-			r.ErrorCode = string(ErrNoObligations)
-		default:
-			r.ErrorCode = string(ErrParse)
-		}
+		r.ErrorCode = string(classifyTLAPMOutput(output, false))
 	}
 
 	return r, nil
@@ -196,6 +189,7 @@ func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResu
 	type result struct {
 		solver string
 		res    RaceSolverResult
+		count  *int
 		err    error
 	}
 
@@ -219,29 +213,46 @@ func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResu
 			start := time.Now()
 			r := RaceSolverResult{Solver: method, ObligationsFailed: -1}
 			cmdArgs := buildRaceCmdArgs(method, args)
-			cmd := exec.Command("tlapm", cmdArgs...)
+			cmd := exec.CommandContext(ctx, "tlapm", cmdArgs...)
 			out, err := cmd.CombinedOutput()
 			r.TotalTimeSeconds = time.Since(start).Seconds()
+			var count *int
+			r.Obligations, count = parseToolboxObligations(string(out))
+			if count == nil {
+				if completed, found := completedObligationCount(string(out)); found {
+					count = &completed
+				}
+			}
 
 			if errors.Is(err, exec.ErrNotFound) {
 				r.Error = fmt.Sprintf("tlapm binary not available: %v", err)
+				r.ErrorCode = string(ErrTLAPMNotFound)
 			} else if err != nil {
-				r.Error = strings.TrimSpace(string(out))
-				if strings.Contains(strings.ToLower(r.Error), "corrupt") ||
-					strings.Contains(strings.ToLower(r.Error), "invalid fingerprint") {
-					r.Error = fmt.Sprintf("corrupted fingerprint for method %s", method)
-				}
+				r.ErrorCode = string(classifyTLAPMOutput(string(out), true))
+				r.Error = summarizeRaceError(string(out))
 			} else if allObligationsProved(string(out)) {
 				r.Success = true
 				r.ObligationsFailed = 0
 			} else if hasZeroObligationCompletion(string(out)) {
 				r.Error = "TLAPM reported zero proof obligations for the selected target"
+				r.ErrorCode = string(ErrNoObligations)
 			} else {
 				r.Error = "TLAPM output did not confirm that all obligations were proved"
+				r.ErrorCode = string(classifyTLAPMOutput(string(out), false))
 			}
+			finalizeObligations(r.Obligations, r.Success, r.Error)
+			if count == nil && hasStructuredObligations(r.Obligations) {
+				obligationCount := len(r.Obligations)
+				count = &obligationCount
+			}
+			if r.ObligationsFailed < 0 && count != nil && len(r.Obligations) == *count {
+				r.ObligationsFailed = countObligationsWithStatus(r.Obligations, "failed", "timeout", "backend-error")
+			}
+			r.Obligations = unresolvedObligations(r.Obligations)
 
 			mu.Lock()
 			results[idx].res = r
+			results[idx].count = count
 			mu.Unlock()
 		}(i, method)
 	}
@@ -252,6 +263,10 @@ func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResu
 	r := RaceResult{Results: make([]RaceSolverResult, len(methods))}
 	for i, res := range results {
 		r.Results[i] = res.res
+		if r.ObligationCount == nil && res.count != nil {
+			count := *res.count
+			r.ObligationCount = &count
+		}
 	}
 
 	// Sort by time ascending
@@ -287,4 +302,19 @@ func buildRaceCmdArgs(method string, args RaceArgs) []string {
 		cmdArgs = append(cmdArgs, "--safefp")
 	}
 	return append(cmdArgs, args.Module)
+}
+
+func summarizeRaceError(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		switch {
+		case strings.HasPrefix(line, "[ERROR]:"):
+			return strings.TrimSpace(strings.TrimPrefix(line, "[ERROR]:"))
+		case strings.HasPrefix(line, "Error:"):
+			return strings.TrimSpace(strings.TrimPrefix(line, "Error:"))
+		case strings.Contains(strings.ToLower(line), "not available"):
+			return line
+		}
+	}
+	return "TLAPM exited with an error"
 }

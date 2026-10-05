@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestParseResultRequiresAggregateProofCompletion(t *testing.T) {
@@ -31,7 +32,7 @@ func TestParseResultRequiresAggregateProofCompletion(t *testing.T) {
 		{
 			name:     "single obligation is not completion",
 			output:   "[INFO]: 1 obligation proved.\n",
-			wantCode: string(ErrParse),
+			wantCode: string(ErrOutputIncomplete),
 		},
 		{
 			name:     "zero obligations is not proof completion",
@@ -41,12 +42,12 @@ func TestParseResultRequiresAggregateProofCompletion(t *testing.T) {
 		{
 			name:     "error overrides completion summary",
 			output:   "[INFO]: All 37 obligations proved.\n[ERROR]: solver failed\n",
-			wantCode: string(ErrParse),
+			wantCode: string(ErrTLAPMFailure),
 		},
 		{
 			name:     "empty output is inconclusive",
 			output:   "",
-			wantCode: string(ErrParse),
+			wantCode: string(ErrOutputIncomplete),
 		},
 	}
 	for _, tt := range tests {
@@ -86,6 +87,80 @@ func TestHasZeroObligationCompletionRejectsErrors(t *testing.T) {
 	}
 }
 
+func TestClassifyTLAPMOutputSeparatesFailureLayers(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		output        string
+		processExited bool
+		want          ErrCode
+	}{
+		{name: "parse failure", output: `Error: Could not parse "Spec.tla" successfully.`, processExited: true, want: ErrTLAPMParse},
+		{name: "failed proof", output: "@!!BEGIN\n@!!type:obligation\n@!!id:1\n@!!status:failed\n@!!prover:smt\n@!!END", processExited: true, want: ErrProofFailed},
+		{name: "backend timeout", output: "@!!BEGIN\n@!!type:obligation\n@!!id:1\n@!!status:interrupted\n@!!prover:zenon\n@!!END", processExited: true, want: ErrBackendTimeout},
+		{name: "timeout reason", output: "@!!BEGIN\n@!!type:obligation\n@!!id:1\n@!!status:failed\n@!!prover:zenon\n@!!reason:timeout\n@!!END", processExited: true, want: ErrBackendTimeout},
+		{name: "fingerprint corruption", output: "Fingerprint file is corrupted", processExited: true, want: ErrFingerprintCorrupted},
+		{name: "exit without diagnostics", processExited: true, want: ErrNoDiagnostics},
+		{name: "incomplete output", want: ErrOutputIncomplete},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := classifyTLAPMOutput(tt.output, tt.processExited); got != tt.want {
+				t.Fatalf("classifyTLAPMOutput() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRequestContextErrorsUseSeparateCodes(t *testing.T) {
+	if err := RequestContextError("prove", context.DeadlineExceeded); err.Code != ErrRequestTimeout {
+		t.Errorf("deadline error code = %q, want %q", err.Code, ErrRequestTimeout)
+	}
+	if err := RequestContextError("prove", context.Canceled); err.Code != ErrRequestCancelled {
+		t.Errorf("cancel error code = %q, want %q", err.Code, ErrRequestCancelled)
+	}
+}
+
+func TestProveContextTimeoutStopsTLAPMAndReturnsCode(t *testing.T) {
+	binDir := t.TempDir()
+	tlapm := filepath.Join(binDir, "tlapm")
+	if err := os.WriteFile(tlapm, []byte("#!/bin/sh\nexec /bin/sleep 5\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	module := filepath.Join(binDir, "Spec.tla")
+	if err := os.WriteFile(module, []byte("---- MODULE Spec ----\n====\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	_, err := New().Prove(ctx, ProveArgs{Module: module, Target: LineTarget{Line: 1}})
+	var toolErr *TLAPMError
+	if !errors.As(err, &toolErr) || toolErr.Code != ErrRequestTimeout {
+		t.Fatalf("Prove() error = %v, want code %q", err, ErrRequestTimeout)
+	}
+}
+
+func TestProveExitWithoutDiagnosticsHasDistinctCode(t *testing.T) {
+	binDir := t.TempDir()
+	tlapm := filepath.Join(binDir, "tlapm")
+	if err := os.WriteFile(tlapm, []byte("#!/bin/sh\nexit 17\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	module := filepath.Join(binDir, "Spec.tla")
+	if err := os.WriteFile(module, []byte("---- MODULE Spec ----\n====\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	result, err := New().Prove(context.Background(), ProveArgs{Module: module, Target: LineTarget{Line: 1}})
+	if err != nil {
+		t.Fatalf("Prove() error = %v", err)
+	}
+	if result.Success || result.ErrorCode != string(ErrNoDiagnostics) {
+		t.Fatalf("Prove() result = %+v, want failed result with %q", result, ErrNoDiagnostics)
+	}
+}
+
 func TestEnsureModuleExistsAcceptsAbsolutePath(t *testing.T) {
 	module := filepath.Join(t.TempDir(), "Spec.tla")
 	if err := os.WriteFile(module, []byte("---- MODULE Spec ----\n====\n"), 0o600); err != nil {
@@ -114,8 +189,8 @@ func TestProveReturnsTLAPMNotFound(t *testing.T) {
 
 func TestRaceReturnsTLAPMNotFound(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
-	_, err := New().Race(context.Background(), RaceArgs{
-		Module:  "Spec.tla",
+	_, err := NewWithFS(testdataFS).Race(context.Background(), RaceArgs{
+		Module:  "testdata/hard_proofs.tla",
 		Target:  LineTarget{Line: 1},
 		FPModes: FPDefault,
 	})

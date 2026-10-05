@@ -1,6 +1,8 @@
 package rpc
 
 import (
+	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -49,6 +51,103 @@ func TestProofToolsExposeFlattenedTargetsAndOptions(t *testing.T) {
 				t.Errorf("range alternative required = %#v", rangeAlternative["required"])
 			}
 		})
+	}
+}
+
+func TestCheckToolAllowsOptionalTargets(t *testing.T) {
+	tool := CheckTool()
+	schema := tool.InputSchema.(map[string]any)
+	properties := schema["properties"].(map[string]any)
+	if !reflect.DeepEqual(schema["required"], []any{"module"}) {
+		t.Fatalf("required = %#v, want only module", schema["required"])
+	}
+	alternatives, ok := schema["oneOf"].([]any)
+	if !ok || len(alternatives) != 3 {
+		t.Fatalf("oneOf = %#v, want line, range, and no-target alternatives", schema["oneOf"])
+	}
+	for _, name := range []string{"module", "line", "from", "to"} {
+		if _, ok := properties[name]; !ok {
+			t.Errorf("check schema is missing %q", name)
+		}
+	}
+	if _, ok := properties["cached"]; ok {
+		t.Error("check schema should not expose proof cache options")
+	}
+}
+
+func TestParseCheckArgs(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		args    map[string]any
+		want    prover.CheckArgs
+		wantErr bool
+	}{
+		{name: "whole module", args: map[string]any{"module": "Spec.tla"}, want: prover.CheckArgs{Module: "Spec.tla"}},
+		{name: "line", args: map[string]any{"module": "Spec.tla", "line": float64(9)}, want: prover.CheckArgs{Module: "Spec.tla", Target: prover.LineTarget{Line: 9}}},
+		{name: "range", args: map[string]any{"module": "Spec.tla", "from": float64(9), "to": float64(13)}, want: prover.CheckArgs{Module: "Spec.tla", Target: prover.LineTarget{Range: &prover.LineRange{Start: 9, End: 13}}}},
+		{name: "incomplete range", args: map[string]any{"module": "Spec.tla", "from": float64(9)}, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseCheckArgs(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseCheckArgs() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if err == nil && !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("parseCheckArgs() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestInvalidToolArgumentsHaveStructuredErrorCodes(t *testing.T) {
+	tests := []struct {
+		name  string
+		parse func() error
+		code  prover.ErrCode
+	}{
+		{
+			name: "invalid range",
+			parse: func() error {
+				_, err := parseProveArgs(map[string]any{"module": "Spec.tla", "from": float64(8)})
+				return err
+			},
+			code: prover.ErrInvalidRange,
+		},
+		{
+			name: "missing module",
+			parse: func() error {
+				_, err := parseRaceArgs(map[string]any{"line": float64(8)})
+				return err
+			},
+			code: prover.ErrInvalidModule,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.parse()
+			var toolErr *prover.TLAPMError
+			if !errors.As(err, &toolErr) || toolErr.Code != tt.code {
+				t.Fatalf("parse error = %v, want code %q", err, tt.code)
+			}
+		})
+	}
+}
+
+func TestToolErrorResultReturnsStructuredCode(t *testing.T) {
+	result, err := toolErrorResult(prover.WrapToolError("prove", prover.ErrInvalidRange, "range is invalid", ""))
+	if err != nil {
+		t.Fatalf("toolErrorResult() error = %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("tool error result has IsError=false")
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("tool error payload is not JSON: %v", err)
+	}
+	if payload["code"] != string(prover.ErrInvalidRange) {
+		t.Fatalf("error code = %v, want %q", payload["code"], prover.ErrInvalidRange)
 	}
 }
 

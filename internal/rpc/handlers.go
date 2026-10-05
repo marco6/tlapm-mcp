@@ -4,12 +4,73 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/tlaplus/tlapm-mcp/internal/prover"
 )
+
+// ---------------------------------------------------------------------------
+// check
+// ---------------------------------------------------------------------------
+
+// CheckTool returns the MCP tool definition for check.
+func CheckTool() *mcp.Tool {
+	properties := targetProperties()
+	properties["module"] = map[string]any{
+		"type":        "string",
+		"description": "Path to the TLA+ module file (absolute or relative to the server working directory).",
+	}
+	return &mcp.Tool{
+		Name:        "check",
+		Description: "Parse and elaborate a TLA+ module without running proof backends. An optional line or inclusive range limits the check.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": properties,
+			"required":   []any{"module"},
+			"oneOf":      optionalTargetAlternatives(),
+		},
+	}
+}
+
+// CheckHandler is the tool handler for check.
+func CheckHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var args map[string]any
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return toolErrorResult(prover.WrapToolError("check", prover.ErrInvalidRequest, "invalid tool arguments", err.Error()))
+		}
+		ca, err := parseCheckArgs(args)
+		if err != nil {
+			return toolErrorResult(err)
+		}
+		result, err := p.Check(ctx, ca)
+		if err != nil {
+			return toolErrorResult(err)
+		}
+		data, err := json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+		}, nil
+	}
+}
+
+func parseCheckArgs(args map[string]any) (prover.CheckArgs, error) {
+	module, ok := args["module"].(string)
+	if !ok || module == "" {
+		return prover.CheckArgs{}, prover.WrapToolError("check", prover.ErrInvalidModule, "module path is required", "")
+	}
+	target, err := parseOptionalLineTarget(args)
+	if err != nil {
+		return prover.CheckArgs{}, prover.WrapToolError("check", prover.ErrInvalidRange, err.Error(), "")
+	}
+	return prover.CheckArgs{Module: module, Target: target}, nil
+}
 
 // ---------------------------------------------------------------------------
 // prove
@@ -40,11 +101,11 @@ func ProveHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolR
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var args map[string]any
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return nil, err
+			return toolErrorResult(prover.WrapToolError("prove", prover.ErrInvalidRequest, "invalid tool arguments", err.Error()))
 		}
 		pa, err := parseProveArgs(args)
 		if err != nil {
-			return nil, err
+			return toolErrorResult(err)
 		}
 		result, err := p.Prove(ctx, pa)
 		if err != nil {
@@ -64,17 +125,17 @@ func ProveHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolR
 func parseProveArgs(args map[string]any) (prover.ProveArgs, error) {
 	module, ok := args["module"].(string)
 	if !ok || module == "" {
-		return prover.ProveArgs{}, fmt.Errorf("module is required")
+		return prover.ProveArgs{}, prover.WrapToolError("prove", prover.ErrInvalidModule, "module path is required", "")
 	}
 	target, err := parseLineTarget(args)
 	if err != nil {
-		return prover.ProveArgs{}, err
+		return prover.ProveArgs{}, prover.WrapToolError("prove", prover.ErrInvalidRange, err.Error(), "")
 	}
 	pa := prover.ProveArgs{Module: module, Target: target, FPModes: prover.FPDefault}
 	if value, exists := args["cached"]; exists {
 		mode, err := parseCached(value)
 		if err != nil {
-			return prover.ProveArgs{}, err
+			return prover.ProveArgs{}, prover.WrapToolError("prove", prover.ErrInvalidRequest, err.Error(), "")
 		}
 		pa.FPModes = mode
 	}
@@ -110,11 +171,11 @@ func RaceHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRe
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var args map[string]any
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return nil, err
+			return toolErrorResult(prover.WrapToolError("race", prover.ErrInvalidRequest, "invalid tool arguments", err.Error()))
 		}
 		ra, err := parseRaceArgs(args)
 		if err != nil {
-			return nil, err
+			return toolErrorResult(err)
 		}
 		result, err := p.Race(ctx, ra)
 		if err != nil {
@@ -132,25 +193,25 @@ func RaceHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRe
 func parseRaceArgs(args map[string]any) (prover.RaceArgs, error) {
 	module, ok := args["module"].(string)
 	if !ok || module == "" {
-		return prover.RaceArgs{}, fmt.Errorf("module is required")
+		return prover.RaceArgs{}, prover.WrapToolError("race", prover.ErrInvalidModule, "module path is required", "")
 	}
 	target, err := parseLineTarget(args)
 	if err != nil {
-		return prover.RaceArgs{}, err
+		return prover.RaceArgs{}, prover.WrapToolError("race", prover.ErrInvalidRange, err.Error(), "")
 	}
 	ra := prover.RaceArgs{Module: module, Target: target, FPModes: prover.FPDefault}
 	if value, exists := args["cached"]; exists {
 		mode, err := parseCached(value)
 		if err != nil {
-			return prover.RaceArgs{}, err
+			return prover.RaceArgs{}, prover.WrapToolError("race", prover.ErrInvalidRequest, err.Error(), "")
 		}
 		ra.FPModes = mode
 	}
 	return ra, nil
 }
 func toolErrorResult(err error) (*mcp.CallToolResult, error) {
-	tErr, ok := err.(*prover.TLAPMError)
-	if !ok {
+	var tErr *prover.TLAPMError
+	if !errors.As(err, &tErr) {
 		return nil, err
 	}
 	data, marshalErr := json.Marshal(tErr.ToMap())
@@ -219,6 +280,18 @@ func targetAlternatives() []any {
 	}
 }
 
+func optionalTargetAlternatives() []any {
+	return append(targetAlternatives(), map[string]any{
+		"not": map[string]any{
+			"anyOf": []any{
+				map[string]any{"required": []any{"line"}},
+				map[string]any{"required": []any{"from"}},
+				map[string]any{"required": []any{"to"}},
+			},
+		},
+	})
+}
+
 func parseLineTarget(args map[string]any) (prover.LineTarget, error) {
 	lineValue, hasLine := args["line"]
 	fromValue, hasFrom := args["from"]
@@ -248,6 +321,16 @@ func parseLineTarget(args map[string]any) (prover.LineTarget, error) {
 		return prover.LineTarget{}, fmt.Errorf("to must not be before from")
 	}
 	return prover.LineTarget{Range: &prover.LineRange{Start: from, End: to}}, nil
+}
+
+func parseOptionalLineTarget(args map[string]any) (prover.LineTarget, error) {
+	_, hasLine := args["line"]
+	_, hasFrom := args["from"]
+	_, hasTo := args["to"]
+	if !hasLine && !hasFrom && !hasTo {
+		return prover.LineTarget{}, nil
+	}
+	return parseLineTarget(args)
 }
 
 func positiveInteger(value any, name string) (int, error) {

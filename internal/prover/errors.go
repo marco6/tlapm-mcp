@@ -1,6 +1,7 @@
 package prover
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,26 +9,39 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
-// ErrCode identifies the category of a TLAPM error.
+// ErrCode identifies the category of a tool failure.
 type ErrCode string
 
 const (
+	ErrInvalidModule  ErrCode = "INVALID_MODULE"
+	ErrInvalidRange   ErrCode = "INVALID_RANGE"
+	ErrInvalidRequest ErrCode = "INVALID_REQUEST"
 	// ErrTLAPMNotFound is returned when the tlapm binary is not on PATH.
 	ErrTLAPMNotFound ErrCode = "TLAPM_NOT_FOUND"
-	// ErrModuleNotFound is returned when the specified module file does not exist.
-	ErrModuleNotFound ErrCode = "MODULE_NOT_FOUND"
+	// ErrModuleNotFound is retained as an alias for ErrInvalidModule.
+	ErrModuleNotFound ErrCode = ErrInvalidModule
 	// ErrSolverUnavailable is returned when a solver binary is missing or incompatible.
 	ErrSolverUnavailable ErrCode = "SOLVER_UNAVAILABLE"
 	// ErrFingerprintCorrupted is returned when the fingerprint cache file is corrupt.
 	ErrFingerprintCorrupted ErrCode = "FINGERPRINT_CORRUPTED"
-	// ErrParse is returned when tlapm output cannot be parsed.
-	ErrParse ErrCode = "PARSE_ERROR"
+	ErrTLAPMParse           ErrCode = "TLAPM_PARSE_ERROR"
+	// ErrParse is retained as an alias for ErrTLAPMParse.
+	ErrParse            ErrCode = ErrTLAPMParse
+	ErrProofFailed      ErrCode = "PROOF_FAILED"
+	ErrBackendTimeout   ErrCode = "BACKEND_TIMEOUT"
+	ErrBackendFailure   ErrCode = "BACKEND_FAILURE"
+	ErrRequestTimeout   ErrCode = "MCP_REQUEST_TIMEOUT"
+	ErrRequestCancelled ErrCode = "MCP_REQUEST_CANCELLED"
+	ErrNoDiagnostics    ErrCode = "TLAPM_EXIT_NO_DIAGNOSTICS"
+	ErrOutputIncomplete ErrCode = "TLAPM_OUTPUT_INCOMPLETE"
+	ErrTLAPMFailure     ErrCode = "TLAPM_FAILURE"
 	// ErrNoObligations is returned when the selected target produces no proof obligations.
 	ErrNoObligations ErrCode = "NO_OBLIGATIONS"
-	// ErrExitCode is returned when tlapm exits with a non-zero code.
+	// ErrExitCode is retained for compatibility with older callers.
 	ErrExitCode ErrCode = "EXIT_CODE"
 	// ErrStep is returned when a step selector is invalid.
 	ErrStep ErrCode = "STEP_INVALID"
@@ -35,7 +49,7 @@ const (
 	ErrIO ErrCode = "IO_ERROR"
 )
 
-// TLAPMError is a structured error with context.
+// TLAPMError is a structured tool error with context.
 type TLAPMError struct {
 	Tool    string  `json:"tool,omitempty"`    // which MCP tool triggered this
 	Code    ErrCode `json:"code"`              // error category
@@ -68,7 +82,7 @@ func (e *TLAPMError) ToMap() map[string]any {
 func Is(code ErrCode) func(error) bool {
 	return func(err error) bool {
 		var tErr *TLAPMError
-		return err != nil && (As(err, &tErr) && tErr.Code == code)
+		return err != nil && errors.As(err, &tErr) && tErr.Code == code
 	}
 }
 
@@ -77,8 +91,7 @@ func As(err error, target **TLAPMError) bool {
 	if err == nil || target == nil {
 		return false
 	}
-	_, ok := err.(*TLAPMError)
-	return ok
+	return errors.As(err, target)
 }
 
 // WrapToolError wraps a raw error with tool context.
@@ -105,6 +118,10 @@ func DetectErrorClass(err error) ErrCode {
 	if err == nil {
 		return ""
 	}
+	var tErr *TLAPMError
+	if errors.As(err, &tErr) {
+		return tErr.Code
+	}
 	msg := err.Error()
 	switch {
 	case strings.Contains(msg, "executable file not found"):
@@ -129,15 +146,170 @@ func ParseExitCodeError(tool string, output []byte, err error) error {
 	}
 
 	outputStr := string(output)
-	if strings.Contains(outputStr, "Fingerprint") &&
-		(strings.Contains(outputStr, "corrupt") || strings.Contains(outputStr, "invalid")) {
-		return WrapToolError(tool, ErrFingerprintCorrupted,
-			"corrupted fingerprint file", outputStr)
+	code := classifyTLAPMOutput(outputStr, true)
+	message := errorMessage(code)
+	details := diagnosticSummary(outputStr)
+	if details == "" {
+		details = err.Error()
 	}
-	if strings.Contains(outputStr, "solver") && strings.Contains(outputStr, "not available") {
-		return WrapToolError(tool, ErrSolverUnavailable, "solver not available", outputStr)
+	return WrapToolError(tool, code, message, details)
+}
+
+// RequestContextError classifies an MCP request cancellation or deadline.
+func RequestContextError(tool string, err error) *TLAPMError {
+	if err == nil {
+		return nil
 	}
-	return WrapError(tool, ErrExitCode, fmt.Sprintf("tlapm exited with code %v", err), err)
+	code := ErrRequestCancelled
+	message := "MCP request was cancelled"
+	if errors.Is(err, context.DeadlineExceeded) {
+		code = ErrRequestTimeout
+		message = "MCP request timed out"
+	}
+	return WrapToolError(tool, code, message, err.Error())
+}
+
+func classifyTLAPMOutput(output string, processExited bool) ErrCode {
+	lower := strings.ToLower(output)
+	switch {
+	case strings.Contains(lower, "fingerprint") &&
+		(strings.Contains(lower, "corrupt") || strings.Contains(lower, "invalid")):
+		return ErrFingerprintCorrupted
+	case isTLAPMParseFailure(lower):
+		return ErrTLAPMParse
+	case strings.Contains(lower, "solver") && strings.Contains(lower, "not available"):
+		return ErrSolverUnavailable
+	case hasBackendTimeoutDiagnostic(output):
+		return ErrBackendTimeout
+	}
+
+	obligations, _ := parseToolboxObligations(output)
+	for _, obligation := range obligations {
+		if obligation.Status == "timeout" {
+			return ErrBackendTimeout
+		}
+	}
+	for _, obligation := range obligations {
+		if obligation.Status == "failed" {
+			return ErrProofFailed
+		}
+	}
+	if proofFailureSummaryRe.MatchString(output) {
+		return ErrProofFailed
+	}
+	if strings.Contains(lower, "backend errors processing") || strings.Contains(lower, "backend error") {
+		return ErrBackendFailure
+	}
+	if hasZeroObligationCompletion(output) {
+		return ErrNoObligations
+	}
+	if processExited {
+		if !hasTLAPMDiagnostics(output) {
+			return ErrNoDiagnostics
+		}
+		return ErrTLAPMFailure
+	}
+	if hasTLAPMDiagnostics(output) {
+		return ErrTLAPMFailure
+	}
+	return ErrOutputIncomplete
+}
+
+var proofFailureSummaryRe = regexp.MustCompile(`(?i)\b[0-9]+\s*/\s*[0-9]+\s+obligations?\s+failed\b`)
+
+func isTLAPMParseFailure(lowerOutput string) bool {
+	for _, line := range strings.Split(lowerOutput, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "error:") && !strings.HasPrefix(line, "[error]:") {
+			continue
+		}
+		if strings.Contains(line, "could not parse") ||
+			strings.Contains(line, "syntax error") ||
+			strings.Contains(line, "could not elaborate") ||
+			strings.Contains(line, "elaboration failed") ||
+			strings.Contains(line, "module not found") ||
+			strings.Contains(line, "cannot find module") ||
+			(strings.Contains(line, "operator ") && strings.Contains(line, " not found")) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBackendTimeoutDiagnostic(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.ToLower(strings.TrimSpace(line))
+		if !strings.HasPrefix(line, "[error]:") && !strings.HasPrefix(line, "error:") && !strings.HasPrefix(line, "zenon error:") {
+			continue
+		}
+		if strings.Contains(line, "timed out") || strings.Contains(line, "timeout") || strings.Contains(line, "time limit exceeded") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasTLAPMDiagnostics(output string) bool {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[ERROR]:") ||
+			strings.HasPrefix(line, "Error:") ||
+			strings.HasPrefix(line, "Zenon error:") {
+			return true
+		}
+	}
+	return isTLAPMParseFailure(strings.ToLower(output))
+}
+
+func errorMessage(code ErrCode) string {
+	switch code {
+	case ErrInvalidModule:
+		return "module path is invalid"
+	case ErrInvalidRange:
+		return "source range is invalid"
+	case ErrInvalidRequest:
+		return "MCP tool arguments are invalid"
+	case ErrTLAPMNotFound:
+		return "tlapm binary is unavailable"
+	case ErrTLAPMParse:
+		return "TLAPM could not parse or elaborate the module"
+	case ErrProofFailed:
+		return "one or more proof obligations failed"
+	case ErrBackendTimeout:
+		return "a proof backend timed out"
+	case ErrFingerprintCorrupted:
+		return "fingerprint cache is corrupted"
+	case ErrRequestTimeout:
+		return "MCP request timed out"
+	case ErrRequestCancelled:
+		return "MCP request was cancelled"
+	case ErrNoDiagnostics:
+		return "TLAPM exited without diagnostics"
+	case ErrSolverUnavailable:
+		return "solver is unavailable"
+	case ErrBackendFailure:
+		return "proof backend failed"
+	case ErrNoObligations:
+		return "no proof obligations were generated for the target"
+	case ErrOutputIncomplete:
+		return "TLAPM output did not confirm a complete result"
+	case ErrTLAPMFailure:
+		return "TLAPM exited with an error"
+	default:
+		return "TLAPM output did not confirm a complete proof result"
+	}
+}
+
+func diagnosticSummary(output string) string {
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		for _, prefix := range []string{"[ERROR]:", "Error:", "Zenon error:"} {
+			if strings.HasPrefix(line, prefix) {
+				return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			}
+		}
+	}
+	return ""
 }
 
 // LogError writes a JSON diagnostic to stderr; stderr is not MCP protocol output.
@@ -209,6 +381,10 @@ func ensureTLAPMBinary(tool string) error {
 
 // EnsureModuleExists checks a module path against the supplied filesystem or the OS for absolute paths.
 func EnsureModuleExists(fsys fs.FS, modulePath string) error {
+	return ensureModuleExists("prove", fsys, modulePath)
+}
+
+func ensureModuleExists(tool string, fsys fs.FS, modulePath string) error {
 	var err error
 	if filepath.IsAbs(modulePath) {
 		_, err = os.Stat(modulePath)
@@ -217,9 +393,9 @@ func EnsureModuleExists(fsys fs.FS, modulePath string) error {
 	}
 	if err != nil {
 		if osIsNotExist(err) {
-			return WrapToolError("prove", ErrModuleNotFound, "module file not found", modulePath)
+			return WrapToolError(tool, ErrModuleNotFound, "module file not found", modulePath)
 		}
-		return WrapError("prove", ErrIO, "cannot read module file", err)
+		return WrapError(tool, ErrIO, "cannot read module file", err)
 	}
 	return nil
 }
