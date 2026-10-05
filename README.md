@@ -29,6 +29,36 @@ Replace both paths with the repository location. Then ask the client: “Prove l
 
 ## MCP Tools
 
+### `check`
+
+Parse and elaborate a module without launching proof backends. Targeting is optional: omit `line`, `from`, and `to` to check the whole module, or provide one line or an inclusive range.
+
+```jsonc
+{
+  "module": "/path/to/Spec.tla"
+}
+```
+
+```jsonc
+{
+  "module": "/path/to/Spec.tla",
+  "from": 28,
+  "to": 34
+}
+```
+
+The check runs TLAPM in no-backend summary mode. `success` means parsing and elaboration completed; it does not mean the proof obligations were proved. Diagnostics contain `line`, `column`, `severity`, and `message`; a zero line or column means TLAPM did not report that location. `obligation_count` is included when TLAPM reports it. For an abnormal TLAPM exit, the response also includes `exit_code` and `stderr`.
+
+```jsonc
+{
+  "success": true,
+  "module": "/path/to/Spec.tla",
+  "range": { "start": 28, "end": 34 },
+  "diagnostics": [],
+  "obligation_count": 2
+}
+```
+
 ### `prove`
 
 Prove one source line or an inclusive source line range. Provide either `line` or both `from` and `to`.
@@ -57,17 +87,24 @@ Single lines use `--line N`; ranges use `--toolbox FROM TO`.
 
 ```jsonc
 {
-  "success": true,
+  "success": false,
   "module": "Spec",
   "line": 28,                         // or "range": { "start": 28, "end": 34 }
   "total_time_seconds": 0.234,
   "timing": { "interaction": 0.210 },
-  "proof_text": "[INFO]: All 37 obligations proved.",
-  "fingerprints_used": "use"
+  "obligation_count": 1,
+  "obligations": [
+    {
+      "line": 8,
+      "status": "failed",
+      "failure_reason": "false"
+    }
+  ],
+  "proof_text": "[ERROR]: 1/1 obligation failed."
 }
 ```
 
-The server reports `success: true` only when `tlapm` exits successfully and emits an aggregate `[INFO]: All N obligations proved.` line with `N > 0`. A zero-obligation summary is returned as `success: false` with `error_code: "NO_OBLIGATIONS"`; it does not confirm that the selected target was proved. A message that only says an individual obligation was proved is not sufficient. `obligations` contains parsed `[ERROR]:` messages; source lines are not extracted by the current parser.
+The server reports `success: true` only when `tlapm` exits successfully and emits an aggregate `[INFO]: All N obligations proved.` line with `N > 0`. A zero-obligation summary is returned as `success: false` with `error_code: "NO_OBLIGATIONS"`; it does not confirm that the selected target was proved. A message that only says an individual obligation was proved is not sufficient. `obligation_count` is the total generated count. `obligations` contains only unresolved obligations, with their source line, status, and a failure reason when available.
 
 ### `race`
 
@@ -95,8 +132,9 @@ Try each method in the fixed method list documented below on one source line or 
   "results": [
     { "solver": "smt",   "success": true,  "total_time_seconds": 0.087, "obligations_failed": 0 },
     { "solver": "zenon", "success": true,  "total_time_seconds": 0.152, "obligations_failed": 0 },
-    { "solver": "z3",    "success": false, "total_time_seconds": 1.203, "obligations_failed": -1, "error": "TLAPM output did not confirm that all obligations were proved" }
-  ]
+    { "solver": "z3",    "success": false, "total_time_seconds": 1.203, "obligations_failed": 1, "error": "TLAPM output did not confirm that all obligations were proved", "obligations": [{ "line": 8, "status": "failed", "failure_reason": "false" }] }
+  ],
+  "obligation_count": 1
 }
 ```
 
@@ -142,9 +180,9 @@ tlapm caches proof results in fingerprint files (`.tlacache/`). Cached results a
 - **`cached: true`** (default) — uses cached results and skips proven obligations.
 - **`cached: false`** — ignores existing cached results and recomputes, useful after definition changes.
 
-## Failing over to a model-readable error
+## Obligation diagnostics
 
-The `obligations` array contains messages parsed from `[ERROR]:` output lines. The current parser does not extract source locations or reconstruct full proof obligations, so these messages are diagnostic text rather than a complete obligation listing.
+`prove` and `race` include only unresolved obligations. Each contains a source line and status, with a failure reason when available; successful obligations are represented by the aggregate counts and result status.
 
 ## Example interactions
 
