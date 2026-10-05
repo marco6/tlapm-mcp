@@ -31,8 +31,8 @@ jobs:
           curl -sL -o "${DIR}/tlapm.tar.gz" \
             "https://github.com/tlaplus/tlapm/releases/download/1.6.0-pre/tlapm-1.6.0-pre-x86_64-linux-gnu.tar.gz"
           tar -xzf "${DIR}/tlapm.tar.gz" -C "$DIR"
-          chmod +x "${DIR}/bin/tlapm"
-          echo "$DIR/bin" >> "$GITHUB_PATH"
+          chmod +x "${DIR}/tlapm/bin/tlapm"
+          echo "${DIR}/tlapm/bin" >> "$GITHUB_PATH"
           tlapm --version
 
       - name: Run tests
