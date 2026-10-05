@@ -27,6 +27,7 @@ type CheckResult struct {
 	ObligationCount *int         `json:"obligation_count,omitempty"`
 	ExitCode        *int         `json:"exit_code,omitempty"`
 	Stderr          *string      `json:"stderr,omitempty"`
+	ErrorCode       string       `json:"error_code,omitempty"`
 }
 
 // Diagnostic is a message reported while parsing or elaborating a module.
@@ -41,7 +42,10 @@ type Diagnostic struct {
 // Check parses and elaborates the selected module without running proof backends.
 func (p *Prover) Check(ctx context.Context, args CheckArgs) (CheckResult, error) {
 	if err := args.Target.validateOptional(); err != nil {
-		return CheckResult{}, err
+		return CheckResult{}, WrapToolError("check", ErrInvalidRange, err.Error(), "")
+	}
+	if args.Module == "" {
+		return CheckResult{}, WrapToolError("check", ErrInvalidModule, "module path is required", "")
 	}
 	if err := ensureModuleExists("check", p.resolveFS(), args.Module); err != nil {
 		return CheckResult{}, err
@@ -57,6 +61,9 @@ func (p *Prover) Check(ctx context.Context, args CheckArgs) (CheckResult, error)
 	cmd.Stderr = &stderr
 	commandErr := cmd.Run()
 	if commandErr != nil {
+		if ctx.Err() != nil {
+			return CheckResult{}, RequestContextError("check", ctx.Err())
+		}
 		var exitErr *exec.ExitError
 		if !errors.As(commandErr, &exitErr) {
 			return CheckResult{}, ParseExitCodeError("check", stderr.Bytes(), commandErr)
@@ -73,6 +80,9 @@ func (p *Prover) Check(ctx context.Context, args CheckArgs) (CheckResult, error)
 	result.Diagnostics = parseDiagnostics(output)
 	result.ObligationCount = parseObligationCount(output)
 	result.Success = commandErr == nil && !hasErrorDiagnostic(result.Diagnostics)
+	if !result.Success {
+		result.ErrorCode = string(classifyTLAPMOutput(output, commandErr != nil))
+	}
 
 	if commandErr != nil {
 		var exitErr *exec.ExitError

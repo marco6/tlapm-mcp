@@ -4,6 +4,7 @@ package rpc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -39,11 +40,11 @@ func CheckHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolR
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var args map[string]any
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return nil, err
+			return toolErrorResult(prover.WrapToolError("check", prover.ErrInvalidRequest, "invalid tool arguments", err.Error()))
 		}
 		ca, err := parseCheckArgs(args)
 		if err != nil {
-			return nil, err
+			return toolErrorResult(err)
 		}
 		result, err := p.Check(ctx, ca)
 		if err != nil {
@@ -62,11 +63,11 @@ func CheckHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolR
 func parseCheckArgs(args map[string]any) (prover.CheckArgs, error) {
 	module, ok := args["module"].(string)
 	if !ok || module == "" {
-		return prover.CheckArgs{}, fmt.Errorf("module is required")
+		return prover.CheckArgs{}, prover.WrapToolError("check", prover.ErrInvalidModule, "module path is required", "")
 	}
 	target, err := parseOptionalLineTarget(args)
 	if err != nil {
-		return prover.CheckArgs{}, err
+		return prover.CheckArgs{}, prover.WrapToolError("check", prover.ErrInvalidRange, err.Error(), "")
 	}
 	return prover.CheckArgs{Module: module, Target: target}, nil
 }
@@ -100,11 +101,11 @@ func ProveHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolR
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var args map[string]any
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return nil, err
+			return toolErrorResult(prover.WrapToolError("prove", prover.ErrInvalidRequest, "invalid tool arguments", err.Error()))
 		}
 		pa, err := parseProveArgs(args)
 		if err != nil {
-			return nil, err
+			return toolErrorResult(err)
 		}
 		result, err := p.Prove(ctx, pa)
 		if err != nil {
@@ -124,17 +125,17 @@ func ProveHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolR
 func parseProveArgs(args map[string]any) (prover.ProveArgs, error) {
 	module, ok := args["module"].(string)
 	if !ok || module == "" {
-		return prover.ProveArgs{}, fmt.Errorf("module is required")
+		return prover.ProveArgs{}, prover.WrapToolError("prove", prover.ErrInvalidModule, "module path is required", "")
 	}
 	target, err := parseLineTarget(args)
 	if err != nil {
-		return prover.ProveArgs{}, err
+		return prover.ProveArgs{}, prover.WrapToolError("prove", prover.ErrInvalidRange, err.Error(), "")
 	}
 	pa := prover.ProveArgs{Module: module, Target: target, FPModes: prover.FPDefault}
 	if value, exists := args["cached"]; exists {
 		mode, err := parseCached(value)
 		if err != nil {
-			return prover.ProveArgs{}, err
+			return prover.ProveArgs{}, prover.WrapToolError("prove", prover.ErrInvalidRequest, err.Error(), "")
 		}
 		pa.FPModes = mode
 	}
@@ -170,11 +171,11 @@ func RaceHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRe
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var args map[string]any
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return nil, err
+			return toolErrorResult(prover.WrapToolError("race", prover.ErrInvalidRequest, "invalid tool arguments", err.Error()))
 		}
 		ra, err := parseRaceArgs(args)
 		if err != nil {
-			return nil, err
+			return toolErrorResult(err)
 		}
 		result, err := p.Race(ctx, ra)
 		if err != nil {
@@ -192,25 +193,25 @@ func RaceHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRe
 func parseRaceArgs(args map[string]any) (prover.RaceArgs, error) {
 	module, ok := args["module"].(string)
 	if !ok || module == "" {
-		return prover.RaceArgs{}, fmt.Errorf("module is required")
+		return prover.RaceArgs{}, prover.WrapToolError("race", prover.ErrInvalidModule, "module path is required", "")
 	}
 	target, err := parseLineTarget(args)
 	if err != nil {
-		return prover.RaceArgs{}, err
+		return prover.RaceArgs{}, prover.WrapToolError("race", prover.ErrInvalidRange, err.Error(), "")
 	}
 	ra := prover.RaceArgs{Module: module, Target: target, FPModes: prover.FPDefault}
 	if value, exists := args["cached"]; exists {
 		mode, err := parseCached(value)
 		if err != nil {
-			return prover.RaceArgs{}, err
+			return prover.RaceArgs{}, prover.WrapToolError("race", prover.ErrInvalidRequest, err.Error(), "")
 		}
 		ra.FPModes = mode
 	}
 	return ra, nil
 }
 func toolErrorResult(err error) (*mcp.CallToolResult, error) {
-	tErr, ok := err.(*prover.TLAPMError)
-	if !ok {
+	var tErr *prover.TLAPMError
+	if !errors.As(err, &tErr) {
 		return nil, err
 	}
 	data, marshalErr := json.Marshal(tErr.ToMap())
