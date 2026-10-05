@@ -33,7 +33,7 @@ jobs:
           tar -xzf "${DIR}/tlapm.tar.gz" -C "$DIR"
           chmod +x "${DIR}/tlapm/bin/tlapm"
           echo "${DIR}/tlapm/bin" >> "$GITHUB_PATH"
-          tlapm --version
+          "${DIR}/tlapm/bin/tlapm" --version
 
       - name: Run tests
         run: go test -race -count=1 -v ./...
