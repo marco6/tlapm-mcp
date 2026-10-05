@@ -7,10 +7,9 @@ Read the top-level `.kb/agents.md` file before continuing below.
 
 # Overview
 
-The `rpc/` package contains the `prove` and `race` tool definitions, handlers, and argument parsers. Both schemas require a module plus either one numeric `line` or an inclusive `from`/`to` pair.
+The `rpc/` package contains the `check`, `prove`, and `race` tool definitions, handlers, and argument parsers. All require a module; `check` accepts an optional target, while `prove` and `race` require either one numeric `line` or an inclusive `from`/`to` pair.
 
 
 # Directory
 
-- `handlers.go` - `prove`/`race` definitions and handlers, flattened target schema helpers, and argument parsing.
-
+- `handlers.go` - `check`/`prove`/`race` definitions and handlers, target schema helpers, and argument parsing.
