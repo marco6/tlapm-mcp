@@ -149,20 +149,6 @@ func unresolvedObligations(obligations []Obligation) []Obligation {
 	return unresolved
 }
 
-func countObligationsWithStatus(obligations []Obligation, statuses ...string) int {
-	wanted := make(map[string]bool, len(statuses))
-	for _, status := range statuses {
-		wanted[status] = true
-	}
-	count := 0
-	for _, obligation := range obligations {
-		if wanted[obligation.Status] {
-			count++
-		}
-	}
-	return count
-}
-
 func hasStructuredObligations(obligations []Obligation) bool {
 	for _, obligation := range obligations {
 		if obligation.id > 0 {

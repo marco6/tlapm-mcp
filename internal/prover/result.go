@@ -1,15 +1,9 @@
 package prover
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 )
 
 // Result is the structured output of a prove invocation.
@@ -25,25 +19,6 @@ type Result struct {
 	ProofText        string             `json:"proof_text"`
 	FingerprintsUsed string             `json:"fingerprints_used"`
 	ErrorCode        string             `json:"error_code,omitempty"` // classification for incomplete or invalid TLAPM output
-}
-
-// RaceResult is the structured output of a race invocation.
-type RaceResult struct {
-	Fastest         RaceSolverResult   `json:"fastest"`
-	Results         []RaceSolverResult `json:"results"`
-	ObligationCount *int               `json:"obligation_count,omitempty"`
-}
-
-// RaceSolverResult is a single solver result in a race.
-type RaceSolverResult struct {
-	Solver           string       `json:"solver"`
-	Success          bool         `json:"success"`
-	TotalTimeSeconds float64      `json:"total_time_seconds"`
-	Obligations      []Obligation `json:"obligations,omitempty"`
-	// -1 means TLAPM did not provide a trustworthy failed-obligation count.
-	ObligationsFailed int    `json:"obligations_failed"`
-	Error             string `json:"error,omitempty"`
-	ErrorCode         string `json:"error_code,omitempty"`
 }
 
 // parseResult parses tlapm output into a Result.
@@ -177,144 +152,4 @@ func parseTotalTime(output string) float64 {
 		}
 	}
 	return 0
-}
-
-// raceParallelism caps concurrent method invocations at a fixed value; it is not an MCP option.
-const raceParallelism = 2
-
-func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResult, error) {
-	if err := args.Target.validate(); err != nil {
-		return RaceResult{}, err
-	}
-	type result struct {
-		solver string
-		res    RaceSolverResult
-		count  *int
-		err    error
-	}
-
-	results := make([]result, len(methods))
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-
-	parallelism := raceParallelism
-	if parallelism > len(methods) {
-		parallelism = len(methods)
-	}
-	sem := make(chan struct{}, parallelism)
-
-	for i, method := range methods {
-		wg.Add(1)
-		go func(idx int, method string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			start := time.Now()
-			r := RaceSolverResult{Solver: method, ObligationsFailed: -1}
-			cmdArgs := buildRaceCmdArgs(method, args)
-			cmd := exec.CommandContext(ctx, "tlapm", cmdArgs...)
-			out, err := cmd.CombinedOutput()
-			r.TotalTimeSeconds = time.Since(start).Seconds()
-			var count *int
-			r.Obligations, count = parseToolboxObligations(string(out))
-			if count == nil {
-				if completed, found := completedObligationCount(string(out)); found {
-					count = &completed
-				}
-			}
-
-			if errors.Is(err, exec.ErrNotFound) {
-				r.Error = fmt.Sprintf("tlapm binary not available: %v", err)
-				r.ErrorCode = string(ErrTLAPMNotFound)
-			} else if err != nil {
-				r.ErrorCode = string(classifyTLAPMOutput(string(out), true))
-				r.Error = summarizeRaceError(string(out))
-			} else if allObligationsProved(string(out)) {
-				r.Success = true
-				r.ObligationsFailed = 0
-			} else if hasZeroObligationCompletion(string(out)) {
-				r.Error = "TLAPM reported zero proof obligations for the selected target"
-				r.ErrorCode = string(ErrNoObligations)
-			} else {
-				r.Error = "TLAPM output did not confirm that all obligations were proved"
-				r.ErrorCode = string(classifyTLAPMOutput(string(out), false))
-			}
-			finalizeObligations(r.Obligations, r.Success, r.Error)
-			if count == nil && hasStructuredObligations(r.Obligations) {
-				obligationCount := len(r.Obligations)
-				count = &obligationCount
-			}
-			if r.ObligationsFailed < 0 && count != nil && len(r.Obligations) == *count {
-				r.ObligationsFailed = countObligationsWithStatus(r.Obligations, "failed", "timeout", "backend-error")
-			}
-			r.Obligations = unresolvedObligations(r.Obligations)
-
-			mu.Lock()
-			results[idx].res = r
-			results[idx].count = count
-			mu.Unlock()
-		}(i, method)
-	}
-
-	wg.Wait()
-
-	// Build RaceResult with sorted results
-	r := RaceResult{Results: make([]RaceSolverResult, len(methods))}
-	for i, res := range results {
-		r.Results[i] = res.res
-		if r.ObligationCount == nil && res.count != nil {
-			count := *res.count
-			r.ObligationCount = &count
-		}
-	}
-
-	// Sort by time ascending
-	for i := 0; i < len(r.Results)-1; i++ {
-		for j := i + 1; j < len(r.Results); j++ {
-			if r.Results[j].TotalTimeSeconds < r.Results[i].TotalTimeSeconds {
-				r.Results[i], r.Results[j] = r.Results[j], r.Results[i]
-			}
-		}
-	}
-
-	// Fastest = first successful, or first overall
-	for _, res := range r.Results {
-		if res.Success {
-			r.Fastest = res
-			break
-		}
-	}
-	if r.Fastest.Solver == "" && len(r.Results) > 0 {
-		r.Fastest = r.Results[0]
-	}
-
-	return r, nil
-}
-
-func buildRaceCmdArgs(method string, args RaceArgs) []string {
-	cmdArgs := []string{"--timing", "--method", method}
-	cmdArgs = args.Target.appendCommandArgs(cmdArgs)
-	switch args.FPModes {
-	case FPNo:
-		cmdArgs = append(cmdArgs, "--nofp")
-	case FPCheck:
-		cmdArgs = append(cmdArgs, "--safefp")
-	}
-	return append(cmdArgs, args.Module)
-}
-
-func summarizeRaceError(output string) string {
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "[ERROR]:"):
-			return strings.TrimSpace(strings.TrimPrefix(line, "[ERROR]:"))
-		case strings.HasPrefix(line, "Error:"):
-			return strings.TrimSpace(strings.TrimPrefix(line, "Error:"))
-		case strings.Contains(strings.ToLower(line), "not available"):
-			return line
-		}
-	}
-	return "TLAPM exited with an error"
 }

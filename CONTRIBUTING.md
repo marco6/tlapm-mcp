@@ -14,7 +14,7 @@
 
 The server is a thin wrapper around the `tlapm` binary. It:
 
-1. **Parses MCP requests** for `prove` and `race`.
+1. **Parses MCP requests** for `check` and `prove`.
 2. **Passes numeric targets to `tlapm`** using `--line N` for one line or `--toolbox FROM TO` for an inclusive range supplied as `from`/`to`.
 3. **Does not parse TLA+ source files**; `tlapm` handles source parsing.
 4. **Reports proof status conservatively**: success requires a zero TLAPM exit status and an explicit aggregate “all obligations proved” summary.
@@ -23,14 +23,6 @@ The server is a thin wrapper around the `tlapm` binary. It:
 
 1. Add the tool definition and argument parsing in `internal/rpc/handlers.go`.
 2. Register the tool and handler in `internal/server/server.go`.
-
-## Adding solver support
-
-The proof method or solver is selected in the TLA+ proof's `BY` clause; the `prove` tool does not override it. `race` tries a fixed set of TLAPM methods in `internal/prover/prover.go`, passing each as `--method`; it does not read `tlapm --config` or auto-detect installed methods.
-
-1. Ensure the relevant TLAPM method and dependencies are on `$PATH`.
-2. Add or remove method names in the `Prover.Race` list when changing the set `race` tries.
-3. Run `race` to see per-method success and availability results.
 
 ## Testing
 

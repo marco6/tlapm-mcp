@@ -106,13 +106,6 @@ type ProveArgs struct {
 	FPModes FPMode     // fingerprint mode (default: use cached)
 }
 
-// RaceArgs holds the arguments for a race invocation.
-type RaceArgs struct {
-	Module  string     // path to .tla file
-	Target  LineTarget // single source line or inclusive line range
-	FPModes FPMode     // fingerprint mode (default: use cached)
-}
-
 // Prove runs tlapm on the given module/target and parses the tool output.
 func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
 	cmd, err := p.buildProveCmd(ctx, args)
@@ -153,26 +146,6 @@ func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
 		}
 	}
 	return result, nil
-}
-
-// Race runs the supported TLAPM methods in parallel and returns sorted results.
-func (p *Prover) Race(ctx context.Context, args RaceArgs) (RaceResult, error) {
-	if err := args.Target.validate(); err != nil {
-		return RaceResult{}, WrapToolError("race", ErrInvalidRange, err.Error(), "")
-	}
-	if err := ensureModuleExists("race", p.resolveFS(), args.Module); err != nil {
-		return RaceResult{}, err
-	}
-	if err := ensureTLAPMBinary("race"); err != nil {
-		LogError("race", err)
-		return RaceResult{}, err
-	}
-	methods := []string{"z3", "smt", "zenon", "auto", "blast", "force", "cvc4", "yices", "verit", "spass", "zipper", "ls4", "fail"}
-	result, err := raceSolvers(ctx, args, methods)
-	if ctx.Err() != nil {
-		return RaceResult{}, RequestContextError("race", ctx.Err())
-	}
-	return result, err
 }
 
 // buildProveCmd constructs the exec.Cmd for a prove invocation.
