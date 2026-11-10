@@ -16,9 +16,16 @@ type Result struct {
 	Timing           map[string]float64 `json:"timing"`
 	ObligationCount  *int               `json:"obligation_count,omitempty"`
 	Obligations      []Obligation       `json:"obligations,omitempty"`
+	Warnings         []Warning          `json:"warnings,omitempty"`
 	ProofText        string             `json:"proof_text"`
 	FingerprintsUsed string             `json:"fingerprints_used"`
 	ErrorCode        string             `json:"error_code,omitempty"` // classification for incomplete or invalid TLAPM output
+}
+
+// Warning is a compact, non-fatal hint about a proof step.
+type Warning struct {
+	Line int    `json:"line"`
+	What string `json:"what"`
 }
 
 // parseResult parses tlapm output into a Result.
@@ -51,6 +58,9 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 		count := len(r.Obligations)
 		r.ObligationCount = &count
 	}
+	if r.Success {
+		r.Warnings = buildWarnings(r.Obligations)
+	}
 	r.Obligations = unresolvedObligations(r.Obligations)
 
 	// Parse timing section
@@ -70,6 +80,73 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 	}
 
 	return r, nil
+}
+
+// byTactics maps TLAPM backend names to identifiers accepted in a BY clause.
+var byTactics = map[string]string{
+	"smt":      "SMT",
+	"smt3":     "SMT",
+	"z3":       "Z3",
+	"z33":      "Z3",
+	"cvc4":     "CVC4",
+	"cvc33":    "CVC4",
+	"verit":    "veriT",
+	"spass":    "Spass",
+	"zipper":   "Zipper",
+	"yices":    "Yices",
+	"yices3":   "Yices",
+	"ls4":      "LS4",
+	"zenon":    "Zenon",
+	"isabelle": "Isa",
+}
+
+func buildWarnings(obligations []Obligation) []Warning {
+	warnings := make([]Warning, 0)
+	seen := make(map[string]bool)
+	for _, obligation := range obligations {
+		if obligation.Status != "proved" || obligation.Line <= 0 {
+			continue
+		}
+		successful := strings.ToLower(obligation.prover)
+		tactic, ok := byTactics[successful]
+		if !ok || !hadBackendFallback(obligation, successful) {
+			continue
+		}
+		key := strconv.Itoa(obligation.Line) + "\x00" + tactic
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		warnings = append(warnings, Warning{
+			Line: obligation.Line,
+			What: "missing `BY " + tactic + "`",
+		})
+	}
+	if len(warnings) == 0 {
+		return nil
+	}
+	return warnings
+}
+
+// hadBackendFallback reports whether a known backend failed before the backend
+// that proved the obligation.
+func hadBackendFallback(obligation Obligation, successful string) bool {
+	for _, attempt := range obligation.attempts {
+		if attempt.status == "proved" {
+			break
+		}
+		if attempt.status != "failed" && attempt.status != "interrupted" {
+			continue
+		}
+		prover := strings.ToLower(attempt.prover)
+		if prover == "" || prover == successful {
+			continue
+		}
+		if _, ok := byTactics[prover]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 var proofCompletionRe = regexp.MustCompile(`^\[INFO\]:\s*All\s+(\d+)\s+obligations?\s+proved\.?$`)

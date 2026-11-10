@@ -107,6 +107,22 @@ Single lines use `--line N`; ranges use `--toolbox FROM TO`.
 
 The server reports `success: true` only when `tlapm` exits successfully and emits an aggregate `[INFO]: All N obligations proved.` line with `N > 0`. A zero-obligation summary is returned as `success: false` with `error_code: "NO_OBLIGATIONS"`; it does not confirm that the selected target was proved. A message that only says an individual obligation was proved is not sufficient. `obligation_count` is the total generated count. `obligations` contains only unresolved obligations, with their source line, status, and a failure reason when available. `error_code` distinguishes proof failures, timeouts, parse errors, and fingerprint errors.
 
+When a proof succeeds but an obligation needed a backend fallback, the result includes compact `warnings`:
+
+```jsonc
+{
+  "success": true,
+  "module": "Spec",
+  "line": 7,
+  "warnings": [
+    { "line": 7, "what": "missing `BY Zenon`" }
+  ],
+  "proof_text": "All 1 obligation proved."
+}
+```
+
+Each warning is a non-fatal hint: at the given line, the proof step would be better with that `BY` annotation. Warnings are emitted only for successful proofs where a known backend failed before another proved the obligation. TLAPM tries SMT, then Zenon, then Isabelle by default, so the annotation removes the failed attempts on subsequent runs.
+
 ## Error Codes
 
 Invalid arguments and missing modules are returned as MCP tool errors with a JSON `code`. TLAPM execution failures use `error_code` in the `check` and `prove` results.
