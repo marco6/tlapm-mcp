@@ -14,15 +14,12 @@ import (
 // CheckArgs holds the arguments for a parse and elaboration check.
 type CheckArgs struct {
 	Module string
-	Target LineTarget
 }
 
 // CheckResult is the structured output of a parse and elaboration check.
 type CheckResult struct {
 	Success         bool         `json:"success"`
 	Module          string       `json:"module"`
-	Line            int          `json:"line,omitempty"`
-	Range           *LineRange   `json:"range,omitempty"`
 	Diagnostics     []Diagnostic `json:"diagnostics"`
 	ObligationCount *int         `json:"obligation_count,omitempty"`
 	ExitCode        *int         `json:"exit_code,omitempty"`
@@ -39,11 +36,8 @@ type Diagnostic struct {
 	Message  string `json:"message"`
 }
 
-// Check parses and elaborates the selected module without running proof backends.
+// Check parses and elaborates a module without running proof backends.
 func (p *Prover) Check(ctx context.Context, args CheckArgs) (CheckResult, error) {
-	if err := args.Target.validateOptional(); err != nil {
-		return CheckResult{}, WrapToolError("check", ErrInvalidRange, err.Error(), "")
-	}
 	if args.Module == "" {
 		return CheckResult{}, WrapToolError("check", ErrInvalidModule, "module path is required", "")
 	}
@@ -72,8 +66,6 @@ func (p *Prover) Check(ctx context.Context, args CheckArgs) (CheckResult, error)
 
 	result := CheckResult{
 		Module:      args.Module,
-		Line:        args.Target.Line,
-		Range:       args.Target.Range,
 		Diagnostics: []Diagnostic{},
 	}
 	output := stdout.String() + "\n" + stderr.String()
@@ -104,12 +96,7 @@ func (p *Prover) Check(ctx context.Context, args CheckArgs) (CheckResult, error)
 }
 
 func buildCheckCmd(ctx context.Context, args CheckArgs) *exec.Cmd {
-	cmdArgs := []string{"--summary", "-N"}
-	if args.Target.Line > 0 || args.Target.Range != nil {
-		cmdArgs = args.Target.appendCommandArgs(cmdArgs)
-	}
-	cmdArgs = append(cmdArgs, args.Module)
-	return exec.CommandContext(ctx, "tlapm", cmdArgs...)
+	return exec.CommandContext(ctx, "tlapm", "--summary", "-N", args.Module)
 }
 
 var (

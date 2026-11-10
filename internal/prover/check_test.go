@@ -20,16 +20,6 @@ func TestBuildCheckCmd(t *testing.T) {
 			args: CheckArgs{Module: "Spec.tla"},
 			want: []string{"--summary", "-N", "Spec.tla"},
 		},
-		{
-			name: "line target",
-			args: CheckArgs{Module: "Spec.tla", Target: LineTarget{Line: 12}},
-			want: []string{"--summary", "-N", "--line", "12", "Spec.tla"},
-		},
-		{
-			name: "range target",
-			args: CheckArgs{Module: "Spec.tla", Target: LineTarget{Range: &LineRange{Start: 12, End: 16}}},
-			want: []string{"--summary", "-N", "--toolbox", "12", "16", "Spec.tla"},
-		},
 	}
 
 	for _, tt := range tests {
@@ -88,7 +78,6 @@ func TestCheck_ArithmeticTheorem(t *testing.T) {
 	p := NewWithFS(testdataFS)
 	result, err := p.Check(context.Background(), CheckArgs{
 		Module: testFile(t, "arithmetic_theorem.tla"),
-		Target: proofObligationTarget(),
 	})
 	if err != nil {
 		t.Fatalf("Check() error = %v", err)
@@ -98,9 +87,6 @@ func TestCheck_ArithmeticTheorem(t *testing.T) {
 	}
 	if result.Module != testFile(t, "arithmetic_theorem.tla") {
 		t.Errorf("Module = %q, want the supplied path", result.Module)
-	}
-	if result.Range == nil || result.Range.Start != 6 || result.Range.End != 8 {
-		t.Errorf("Range = %+v, want inclusive lines 6..8", result.Range)
 	}
 	if result.ObligationCount == nil || *result.ObligationCount != 1 {
 		t.Errorf("ObligationCount = %v, want 1", result.ObligationCount)

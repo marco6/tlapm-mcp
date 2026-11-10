@@ -31,19 +31,11 @@ Replace both paths with the repository location. Then ask the client: “Prove l
 
 ### `check`
 
-Parse and elaborate a module without launching proof backends. Targeting is optional: omit `line`, `from`, and `to` to check the whole module, or provide one line or an inclusive range.
+Parse and elaborate a whole module without launching proof backends. `check` does not accept `line`, `from`, or `to`; use `prove` to select source lines.
 
 ```jsonc
 {
   "module": "/path/to/Spec.tla"
-}
-```
-
-```jsonc
-{
-  "module": "/path/to/Spec.tla",
-  "from": 28,
-  "to": 34
 }
 ```
 
@@ -53,7 +45,6 @@ The check runs TLAPM in no-backend summary mode. `success` means parsing and ela
 {
   "success": true,
   "module": "/path/to/Spec.tla",
-  "range": { "start": 28, "end": 34 },
   "diagnostics": [],
   "obligation_count": 2
 }
@@ -129,7 +120,7 @@ Invalid arguments and missing modules are returned as MCP tool errors with a JSO
 
 | Code | Meaning |
 |------|---------|
-| `INVALID_MODULE` / `INVALID_RANGE` | The module path or source target is invalid. |
+| `INVALID_MODULE` / `INVALID_RANGE` | The module path is invalid, or a `prove` source target is invalid. |
 | `INVALID_REQUEST` | Tool arguments could not be decoded or validated. |
 | `TLAPM_PARSE_ERROR` | TLAPM could not parse or elaborate the module. |
 | `PROOF_FAILED` | One or more generated proof obligations failed. |
@@ -141,9 +132,9 @@ Invalid arguments and missing modules are returned as MCP tool errors with a JSO
 | `TLAPM_FAILURE` / `TLAPM_OUTPUT_INCOMPLETE` | TLAPM failed or did not provide a complete result. |
 | `TLAPM_NOT_FOUND` / `SOLVER_UNAVAILABLE` | TLAPM or a requested solver is unavailable. |
 
-## Line and range targeting
+## Prove targeting
 
-Targets are one-based source line numbers, not theorem names or proof-step paths. Supply exactly one target form:
+`prove` targets are one-based source line numbers, not theorem names or proof-step paths. Supply exactly one target form:
 
 ```jsonc
 { "module": "Spec.tla", "line": 35 }

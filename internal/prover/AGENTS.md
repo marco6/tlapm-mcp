@@ -17,7 +17,7 @@ The prover follows a layered approach:
 1. **Invocation**: `buildCheckCmd()` runs summary mode with backend verifiers disabled; `buildProveCmd()` consumes TLAPM Toolbox events.
 2. **Output parsing**: `Check()` extracts summary obligation counts and best-effort diagnostics. `parseToolboxObligations()` merges repeated Toolbox events by internal obligation ID and records each backend attempt; results expose only unresolved obligations with source line and status. `parseResult()` only marks a proof complete on an aggregate `[INFO]: All N obligations proved.` line where `N > 0` and there are no `[ERROR]:` lines; callers also require a zero process exit status. A zero-obligation summary is classified as `NO_OBLIGATIONS`. Successful proofs whose obligations needed backend fallback also carry compact `warnings` with the proof-step line and a `what` hint naming the missing `BY` annotation.
 3. **Fingerprinting**: `FPMode` enum (`FPDefault`, `FPNo`, `FPCheck`) controls cache behavior via `--usefp`, `--nofp`, and `--safefp` flags. The MCP exposes only `cached: true|false`.
-4. **Targeting**: `check` accepts no target or a one-based `line` / inclusive `from`-`to` target. `prove` requires one of those targets. Targets pass as `--line N` or `--toolbox FROM TO`.
+4. **Targeting**: `check` always checks the whole module and takes no target. `prove` requires a one-based `line` or inclusive `from`-`to` target, passed as `--line N` or `--toolbox FROM TO`.
 
 
 # Important

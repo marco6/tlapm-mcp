@@ -1,6 +1,6 @@
 ---
 name: tlapm-mcp
-description: Use when checking, debugging, or completing TLA+ proofs through the tlapm-mcp tools `check` and `prove`. Covers target selection, result and warning interpretation, error recovery, fingerprint caching, and the proof-repair loop.
+description: Use when checking, debugging, or completing TLA+ proofs through the tlapm-mcp tools `check` and `prove`. Covers whole-module checks, prove target selection, result and warning interpretation, error recovery, fingerprint caching, and the proof-repair loop.
 ---
 
 # tlapm-mcp
@@ -13,21 +13,21 @@ Current interface: `check` and `prove`.
 
 | Tool | Target | Purpose |
 |------|--------|---------|
-| `check` | Optional: omit `line`/`from`/`to` for the whole module, or supply one line or an inclusive range | Parse and elaborate only. No proof backends are launched. |
+| `check` | None: `module` only, always the whole module | Parse and elaborate only. No proof backends are launched. |
 | `prove` | Required: exactly one of `line`, or both `from` and `to` | Run TLAPM proof backends for the selected source line(s). |
 
 Shared argument rules:
 
 - `module` is required. It may be absolute or relative to the **server's working directory**, not necessarily your shell's working directory. When in doubt, pass an absolute path.
-- Lines are one-based source lines.
-- Never combine `line` with `from`/`to`.
-- `from` and `to` are inclusive, positive integers, and `to >= from`.
+- `check` accepts only `module`; it rejects `line`, `from`, and `to`.
+- For `prove`, lines are one-based source lines. Never combine `line` with `from`/`to`.
+- For `prove`, `from` and `to` are inclusive, positive integers, and `to >= from`.
 - `cached` is `prove`-only, boolean, and defaults to `true`.
-- A single `line` becomes `tlapm --line N`; a range becomes `tlapm --toolbox FROM TO`. TLAPM, not the MCP, decides what those source lines mean.
+- A `prove` single `line` becomes `tlapm --line N`; a range becomes `tlapm --toolbox FROM TO`. TLAPM, not the MCP, decides what those source lines mean.
 
 ## Recommended workflow
 
-1. **Check before proving.** Call `check` with the module (and optionally the range) to catch syntax and elaboration errors without paying for backends. Fix `diagnostics` in the module first.
+1. **Check before proving.** Call `check` with the whole module to catch syntax and elaboration errors without paying for backends. Fix `diagnostics` in the module first.
 2. **Read the actual source.** Locate the `THEOREM`, `LEMMA`, proof step, and `BY` clause with line numbers. Do not guess targets from theorem names.
 3. **Prove the smallest useful range.** Include the theorem statement and its proof. If a single line yields `NO_OBLIGATIONS`, widen to the inclusive range covering the step.
 4. **Interpret the result.** `success: true` requires an aggregate `All N obligations proved` summary with `N > 0`; a per-obligation success message is not enough.
@@ -35,15 +35,16 @@ Shared argument rules:
 6. **Use warnings only after success.** A `warning` such as `missing \`BY Zenon\`` is a non-fatal hint: adding that `BY` tactic to the indicated step avoids a failed backend on the next run.
 7. **Bypass cache after source changes.** Keep the default `cached: true` for iteration; pass `cached: false` after editing definitions or when a result looks stale.
 
-## Target selection
+## Check usage
 
 ```jsonc
-// Whole module: parse and elaborate only
+// Parse and elaborate the whole module
 { "module": "/abs/path/Spec.tla" }
+```
 
-// Narrowed check
-{ "module": "/abs/path/Spec.tla", "from": 28, "to": 34 }
+## Prove target selection
 
+```jsonc
 // Prove one proof step line
 { "module": "/abs/path/Spec.tla", "line": 35 }
 
@@ -66,7 +67,6 @@ A range can cover several obligations. Prefer it when the exact step line is unc
 {
   "success": true,
   "module": "Spec.tla",
-  "range": { "start": 28, "end": 34 },
   "diagnostics": [],
   "obligation_count": 1
 }
@@ -110,7 +110,7 @@ A range can cover several obligations. Prefer it when the exact step line is unc
 |------|---------|--------|
 | `INVALID_MODULE` | Module path is empty or does not exist from the server working directory. | Use an absolute path and confirm the file exists. |
 | `INVALID_RANGE` | Missing, conflicting, or non-positive target; `to < from`. | Supply exactly one of `line` or `from`+`to`, with positive ordered integers. |
-| `INVALID_REQUEST` | Arguments could not be decoded; `cached` was not boolean. | Send valid JSON with the documented types. |
+| `INVALID_REQUEST` | Arguments could not be decoded; `cached` was not boolean; `check` received `line`/`from`/`to`. | Send valid JSON with the documented types; omit targets from `check`. |
 | `TLAPM_PARSE_ERROR` | TLAPM could not parse or elaborate. | Fix the reported syntax/definition error, then `check` again. |
 | `PROOF_FAILED` | One or more obligations failed. | Inspect `obligations[].line` and `failure_reason`; fix the step or proof. |
 | `BACKEND_TIMEOUT` | A proof backend timed out or was interrupted. | Narrow the target, split the proof, and simplify before retrying. |
@@ -145,7 +145,8 @@ Use the unresolved obligation's `line` as the anchor:
 - Never claim a proof succeeded from a successful `check`; it only parses and elaborates.
 - Never claim success from an individual obligation message. Require `success: true` and the aggregate count.
 - Never claim success when `obligation_count` is zero or `error_code` is `NO_OBLIGATIONS`.
-- Do not pass theorem names, `--line`, `--toolbox`, `--nofp`, or other TLAPM flags in `module`; use the typed fields.
+- Do not pass theorem names, `--line`, `--toolbox`, `--nofp`, or other TLAPM flags in `module`; use `line`/`from`/`to` only with `prove`.
+- Do not send `line`, `from`, or `to` to `check`; it always checks the whole module and rejects those fields.
 - Do not expect the MCP to modify the module. Edit the `.tla` file with the normal file tools, then call `check`/`prove` again.
 - Do not assume the module's working directory: relative paths are resolved by the server process.
 
