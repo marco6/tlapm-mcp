@@ -118,7 +118,7 @@ func TestProve_RangeTarget(t *testing.T) {
 	}
 }
 
-func TestProve_FailedProofReturnsBackendAttempts(t *testing.T) {
+func TestProve_FailedProofReturnsCompactObligation(t *testing.T) {
 	module := filepath.Join(t.TempDir(), "Unprovable.tla")
 	source := "---- MODULE Unprovable ----\nNope == FALSE\nTHEOREM T == Nope\nBY DEF Nope\n====\n"
 	if err := os.WriteFile(module, []byte(source), 0o600); err != nil {
@@ -135,6 +135,9 @@ func TestProve_FailedProofReturnsBackendAttempts(t *testing.T) {
 	}
 	if result.Success {
 		t.Fatal("Prove() succeeded for an unprovable theorem")
+	}
+	if result.ErrorCode != string(ErrProofFailed) {
+		t.Errorf("ErrorCode = %q, want %q", result.ErrorCode, ErrProofFailed)
 	}
 	if result.ObligationCount == nil || *result.ObligationCount != 1 {
 		t.Fatalf("ObligationCount = %v, want 1", result.ObligationCount)
@@ -153,7 +156,7 @@ func TestProve_FailedProofReturnsBackendAttempts(t *testing.T) {
 
 func TestBuildProveCmdUsesTLAPMDefaults(t *testing.T) {
 	p := New()
-	cmd, err := p.buildProveCmd(ProveArgs{
+	cmd, err := p.buildProveCmd(context.Background(), ProveArgs{
 		Module: "Spec.tla",
 		Target: LineTarget{Line: 28},
 	})

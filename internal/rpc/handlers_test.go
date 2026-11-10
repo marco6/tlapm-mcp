@@ -1,6 +1,8 @@
 package rpc
 
 import (
+	"encoding/json"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -94,6 +96,58 @@ func TestParseCheckArgs(t *testing.T) {
 				t.Fatalf("parseCheckArgs() = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestInvalidToolArgumentsHaveStructuredErrorCodes(t *testing.T) {
+	tests := []struct {
+		name  string
+		parse func() error
+		code  prover.ErrCode
+	}{
+		{
+			name: "invalid range",
+			parse: func() error {
+				_, err := parseProveArgs(map[string]any{"module": "Spec.tla", "from": float64(8)})
+				return err
+			},
+			code: prover.ErrInvalidRange,
+		},
+		{
+			name: "missing module",
+			parse: func() error {
+				_, err := parseRaceArgs(map[string]any{"line": float64(8)})
+				return err
+			},
+			code: prover.ErrInvalidModule,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.parse()
+			var toolErr *prover.TLAPMError
+			if !errors.As(err, &toolErr) || toolErr.Code != tt.code {
+				t.Fatalf("parse error = %v, want code %q", err, tt.code)
+			}
+		})
+	}
+}
+
+func TestToolErrorResultReturnsStructuredCode(t *testing.T) {
+	result, err := toolErrorResult(prover.WrapToolError("prove", prover.ErrInvalidRange, "range is invalid", ""))
+	if err != nil {
+		t.Fatalf("toolErrorResult() error = %v", err)
+	}
+	if !result.IsError {
+		t.Fatal("tool error result has IsError=false")
+	}
+	text := result.Content[0].(*mcp.TextContent).Text
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(text), &payload); err != nil {
+		t.Fatalf("tool error payload is not JSON: %v", err)
+	}
+	if payload["code"] != string(prover.ErrInvalidRange) {
+		t.Fatalf("error code = %v, want %q", payload["code"], prover.ErrInvalidRange)
 	}
 }
 

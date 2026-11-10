@@ -121,6 +121,9 @@ func TestCheck_ParseFailureIncludesDiagnosticAndProcessDetails(t *testing.T) {
 	if result.Success {
 		t.Fatal("Check() succeeded for a module with a parse error")
 	}
+	if result.ErrorCode != string(ErrTLAPMParse) {
+		t.Errorf("ErrorCode = %q, want %q", result.ErrorCode, ErrTLAPMParse)
+	}
 	if result.ExitCode == nil || *result.ExitCode == 0 {
 		t.Errorf("ExitCode = %v, want a non-zero process exit code", result.ExitCode)
 	}

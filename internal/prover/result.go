@@ -43,6 +43,7 @@ type RaceSolverResult struct {
 	// -1 means TLAPM did not provide a trustworthy failed-obligation count.
 	ObligationsFailed int    `json:"obligations_failed"`
 	Error             string `json:"error,omitempty"`
+	ErrorCode         string `json:"error_code,omitempty"`
 }
 
 // parseResult parses tlapm output into a Result.
@@ -90,14 +91,7 @@ func parseResult(output string, args ProveArgs) (Result, error) {
 
 	// Set error code based on success state and output content
 	if !r.Success {
-		switch {
-		case strings.Contains(output, "corrupt") || strings.Contains(output, "invalid fingerprint"):
-			r.ErrorCode = string(ErrFingerprintCorrupted)
-		case hasZeroObligationCompletion(output):
-			r.ErrorCode = string(ErrNoObligations)
-		default:
-			r.ErrorCode = string(ErrParse)
-		}
+		r.ErrorCode = string(classifyTLAPMOutput(output, false))
 	}
 
 	return r, nil
@@ -219,7 +213,7 @@ func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResu
 			start := time.Now()
 			r := RaceSolverResult{Solver: method, ObligationsFailed: -1}
 			cmdArgs := buildRaceCmdArgs(method, args)
-			cmd := exec.Command("tlapm", cmdArgs...)
+			cmd := exec.CommandContext(ctx, "tlapm", cmdArgs...)
 			out, err := cmd.CombinedOutput()
 			r.TotalTimeSeconds = time.Since(start).Seconds()
 			var count *int
@@ -232,20 +226,19 @@ func raceSolvers(ctx context.Context, args RaceArgs, methods []string) (RaceResu
 
 			if errors.Is(err, exec.ErrNotFound) {
 				r.Error = fmt.Sprintf("tlapm binary not available: %v", err)
+				r.ErrorCode = string(ErrTLAPMNotFound)
 			} else if err != nil {
-				if strings.Contains(strings.ToLower(string(out)), "corrupt") ||
-					strings.Contains(strings.ToLower(string(out)), "invalid fingerprint") {
-					r.Error = fmt.Sprintf("corrupted fingerprint for method %s", method)
-				} else {
-					r.Error = summarizeRaceError(string(out))
-				}
+				r.ErrorCode = string(classifyTLAPMOutput(string(out), true))
+				r.Error = summarizeRaceError(string(out))
 			} else if allObligationsProved(string(out)) {
 				r.Success = true
 				r.ObligationsFailed = 0
 			} else if hasZeroObligationCompletion(string(out)) {
 				r.Error = "TLAPM reported zero proof obligations for the selected target"
+				r.ErrorCode = string(ErrNoObligations)
 			} else {
 				r.Error = "TLAPM output did not confirm that all obligations were proved"
+				r.ErrorCode = string(classifyTLAPMOutput(string(out), false))
 			}
 			finalizeObligations(r.Obligations, r.Success, r.Error)
 			if count == nil && hasStructuredObligations(r.Obligations) {
