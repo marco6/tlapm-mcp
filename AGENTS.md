@@ -23,6 +23,7 @@ tlapm-mcp exposes two tools: `check` and `prove`. `check` parses and elaborates 
 - `cmd/` - Binary entry point for the MCP server.
 - `internal/` - Core internal packages: server setup, RPC handlers, and prover logic.
 - `testcases/` - Copy of testdata for manual testing.
+- `skills/` - Agent skill packs; `skills/tlapm-mcp/SKILL.md` documents the `check`/`prove` workflow.
 - `go.mod` - Go module definition.
 - `go.sum` - Go dependency checksums.
 - `README.md` - Project readme with tool schemas and examples.
