@@ -12,10 +12,19 @@ type Obligation struct {
 	Status        string `json:"status"`
 	FailureReason string `json:"failure_reason,omitempty"`
 	id            int
+	prover        string
+	attempts      []backendAttempt
+}
+
+// backendAttempt records one backend's result for an obligation.
+type backendAttempt struct {
+	prover string
+	status string
 }
 
 type toolboxEvent struct {
 	fields     map[string]string
+	prover     string
 	hasBackend bool
 }
 
@@ -46,6 +55,9 @@ func parseToolboxObligations(output string) ([]Obligation, *int) {
 			switch key {
 			case "prover":
 				current.hasBackend = true
+				if prover := strings.TrimSpace(value); prover != "" {
+					current.prover = prover
+				}
 			case "obl", "method", "meth", "already":
 				continue
 			default:
@@ -101,6 +113,16 @@ func consumeToolboxEvent(event *toolboxEvent, indices map[int]int, obligations *
 			if obligation.FailureReason == "" {
 				obligation.FailureReason = "TLAPM reported that the obligation failed"
 			}
+		}
+	}
+	if event.hasBackend && event.prover != "" && rawStatus != "" {
+		prover := strings.ToLower(event.prover)
+		obligation.attempts = append(obligation.attempts, backendAttempt{
+			prover: prover,
+			status: rawStatus,
+		})
+		if rawStatus == "proved" {
+			obligation.prover = prover
 		}
 	}
 	return count

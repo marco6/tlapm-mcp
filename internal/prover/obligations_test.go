@@ -91,6 +91,227 @@ func TestFinalizePendingObligation(t *testing.T) {
 	}
 }
 
+func TestParseResultWarnsAboutBackendAfterFallback(t *testing.T) {
+	output := `@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:to be proved
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:failed
+@!!prover:smt
+@!!reason:false
+@!!already:false
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:proved
+@!!prover:zenon
+@!!already:false
+@!!END
+@!!BEGIN
+@!!type:obligationsnumber
+@!!count:1
+@!!END
+[INFO]: All 1 obligation proved.
+`
+
+	result, err := parseResult(output, ProveArgs{
+		Module: "Fallback.tla",
+		Target: LineTarget{Line: 7},
+	})
+	if err != nil {
+		t.Fatalf("parseResult() error = %v", err)
+	}
+	if !result.Success {
+		t.Fatal("parseResult() did not report success")
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("Warnings = %#v, want one warning", result.Warnings)
+	}
+	if result.Warnings[0] != (Warning{Line: 7, What: "missing `BY Zenon`"}) {
+		t.Fatalf("warning = %+v, want line 7 missing BY Zenon", result.Warnings[0])
+	}
+}
+
+func TestParseResultWarnsAboutIsabelleAfterTwoFallbacks(t *testing.T) {
+	output := `@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:9:1:9:8
+@!!status:failed
+@!!prover:smt
+@!!reason:timeout
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:9:1:9:8
+@!!status:failed
+@!!prover:zenon
+@!!reason:false
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:9:1:9:8
+@!!status:proved
+@!!prover:isabelle
+@!!END
+[INFO]: All 1 obligation proved.
+`
+
+	result, err := parseResult(output, ProveArgs{Module: "Fallback.tla", Target: LineTarget{Line: 9}})
+	if err != nil {
+		t.Fatalf("parseResult() error = %v", err)
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("Warnings = %#v, want one warning", result.Warnings)
+	}
+	if result.Warnings[0] != (Warning{Line: 9, What: "missing `BY Isa`"}) {
+		t.Fatalf("warning = %+v, want line 9 missing BY Isa", result.Warnings[0])
+	}
+}
+
+func TestParseResultDoesNotTreatInProgressBackendAsFailure(t *testing.T) {
+	output := `@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:being proved
+@!!prover:smt
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:proved
+@!!prover:smt
+@!!END
+[INFO]: All 1 obligation proved.
+`
+
+	result, err := parseResult(output, ProveArgs{Module: "Direct.tla", Target: LineTarget{Line: 7}})
+	if err != nil {
+		t.Fatalf("parseResult() error = %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("Warnings = %#v, want none", result.Warnings)
+	}
+}
+
+func TestParseResultIgnoresNonBackendFailures(t *testing.T) {
+	output := `@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:failed
+@!!prover:expandcdot
+@!!reason:hidden definition
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:proved
+@!!prover:smt
+@!!END
+[INFO]: All 1 obligation proved.
+`
+
+	result, err := parseResult(output, ProveArgs{Module: "Direct.tla", Target: LineTarget{Line: 7}})
+	if err != nil {
+		t.Fatalf("parseResult() error = %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("Warnings = %#v, want none", result.Warnings)
+	}
+}
+
+func TestParseResultOmitsWarningsOnFailedProof(t *testing.T) {
+	output := `@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:failed
+@!!prover:smt
+@!!reason:false
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:failed
+@!!prover:zenon
+@!!reason:false
+@!!END
+[ERROR]: 1/1 obligation failed.
+`
+
+	result, err := parseResult(output, ProveArgs{Module: "Unproved.tla", Target: LineTarget{Line: 7}})
+	if err != nil {
+		t.Fatalf("parseResult() error = %v", err)
+	}
+	if result.Success {
+		t.Fatal("parseResult() reported success")
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("Warnings = %#v, want none for an unproved obligation", result.Warnings)
+	}
+}
+
+func TestParseResultDeduplicatesWarningsForSameLine(t *testing.T) {
+	output := `@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:failed
+@!!prover:smt
+@!!reason:false
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:1
+@!!loc:7:1:7:8
+@!!status:proved
+@!!prover:zenon
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:2
+@!!loc:7:1:7:8
+@!!status:failed
+@!!prover:isabelle
+@!!reason:false
+@!!END
+@!!BEGIN
+@!!type:obligation
+@!!id:2
+@!!loc:7:1:7:8
+@!!status:proved
+@!!prover:zenon
+@!!END
+[INFO]: All 2 obligations proved.
+`
+
+	result, err := parseResult(output, ProveArgs{Module: "Merged.tla", Target: LineTarget{Line: 7}})
+	if err != nil {
+		t.Fatalf("parseResult() error = %v", err)
+	}
+	if len(result.Warnings) != 1 {
+		t.Fatalf("Warnings = %#v, want one warning", result.Warnings)
+	}
+	if result.Warnings[0] != (Warning{Line: 7, What: "missing `BY Zenon`"}) {
+		t.Fatalf("warning = %+v, want line 7 missing BY Zenon", result.Warnings[0])
+	}
+}
+
 func TestParsePartialToolboxEventAtEOF(t *testing.T) {
 	output := `@!!BEGIN
 @!!type:obligation
