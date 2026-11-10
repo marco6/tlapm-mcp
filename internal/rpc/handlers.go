@@ -12,6 +12,66 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// check
+// ---------------------------------------------------------------------------
+
+// CheckTool returns the MCP tool definition for check.
+func CheckTool() *mcp.Tool {
+	properties := targetProperties()
+	properties["module"] = map[string]any{
+		"type":        "string",
+		"description": "Path to the TLA+ module file (absolute or relative to the server working directory).",
+	}
+	return &mcp.Tool{
+		Name:        "check",
+		Description: "Parse and elaborate a TLA+ module without running proof backends. An optional line or inclusive range limits the check.",
+		InputSchema: map[string]any{
+			"type":       "object",
+			"properties": properties,
+			"required":   []any{"module"},
+			"oneOf":      optionalTargetAlternatives(),
+		},
+	}
+}
+
+// CheckHandler is the tool handler for check.
+func CheckHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var args map[string]any
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return nil, err
+		}
+		ca, err := parseCheckArgs(args)
+		if err != nil {
+			return nil, err
+		}
+		result, err := p.Check(ctx, ca)
+		if err != nil {
+			return toolErrorResult(err)
+		}
+		data, err := json.Marshal(result)
+		if err != nil {
+			return nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
+		}, nil
+	}
+}
+
+func parseCheckArgs(args map[string]any) (prover.CheckArgs, error) {
+	module, ok := args["module"].(string)
+	if !ok || module == "" {
+		return prover.CheckArgs{}, fmt.Errorf("module is required")
+	}
+	target, err := parseOptionalLineTarget(args)
+	if err != nil {
+		return prover.CheckArgs{}, err
+	}
+	return prover.CheckArgs{Module: module, Target: target}, nil
+}
+
+// ---------------------------------------------------------------------------
 // prove
 // ---------------------------------------------------------------------------
 
@@ -219,6 +279,18 @@ func targetAlternatives() []any {
 	}
 }
 
+func optionalTargetAlternatives() []any {
+	return append(targetAlternatives(), map[string]any{
+		"not": map[string]any{
+			"anyOf": []any{
+				map[string]any{"required": []any{"line"}},
+				map[string]any{"required": []any{"from"}},
+				map[string]any{"required": []any{"to"}},
+			},
+		},
+	})
+}
+
 func parseLineTarget(args map[string]any) (prover.LineTarget, error) {
 	lineValue, hasLine := args["line"]
 	fromValue, hasFrom := args["from"]
@@ -248,6 +320,16 @@ func parseLineTarget(args map[string]any) (prover.LineTarget, error) {
 		return prover.LineTarget{}, fmt.Errorf("to must not be before from")
 	}
 	return prover.LineTarget{Range: &prover.LineRange{Start: from, End: to}}, nil
+}
+
+func parseOptionalLineTarget(args map[string]any) (prover.LineTarget, error) {
+	_, hasLine := args["line"]
+	_, hasFrom := args["from"]
+	_, hasTo := args["to"]
+	if !hasLine && !hasFrom && !hasTo {
+		return prover.LineTarget{}, nil
+	}
+	return parseLineTarget(args)
 }
 
 func positiveInteger(value any, name string) (int, error) {

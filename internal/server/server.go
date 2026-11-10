@@ -25,6 +25,7 @@ func New(p *prover.Prover) *Server {
 
 // RegisterTools registers all MCP tools with their handlers.
 func (s *Server) RegisterTools() {
+	s.mcpServer.AddTool(rpc.CheckTool(), rpc.CheckHandler(s.prover))
 	s.mcpServer.AddTool(rpc.ProveTool(), rpc.ProveHandler(s.prover))
 	s.mcpServer.AddTool(rpc.RaceTool(), rpc.RaceHandler(s.prover))
 }

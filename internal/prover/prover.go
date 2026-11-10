@@ -84,6 +84,13 @@ func (t LineTarget) validate() error {
 	return errors.New("exactly one positive line or valid range is required")
 }
 
+func (t LineTarget) validateOptional() error {
+	if t.Line == 0 && t.Range == nil {
+		return nil
+	}
+	return t.validate()
+}
+
 // appendCommandArgs adds tlapm's native target flags to args.
 func (t LineTarget) appendCommandArgs(args []string) []string {
 	if t.Range == nil {

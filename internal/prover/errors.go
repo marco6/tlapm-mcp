@@ -209,6 +209,10 @@ func ensureTLAPMBinary(tool string) error {
 
 // EnsureModuleExists checks a module path against the supplied filesystem or the OS for absolute paths.
 func EnsureModuleExists(fsys fs.FS, modulePath string) error {
+	return ensureModuleExists("prove", fsys, modulePath)
+}
+
+func ensureModuleExists(tool string, fsys fs.FS, modulePath string) error {
 	var err error
 	if filepath.IsAbs(modulePath) {
 		_, err = os.Stat(modulePath)
@@ -217,9 +221,9 @@ func EnsureModuleExists(fsys fs.FS, modulePath string) error {
 	}
 	if err != nil {
 		if osIsNotExist(err) {
-			return WrapToolError("prove", ErrModuleNotFound, "module file not found", modulePath)
+			return WrapToolError(tool, ErrModuleNotFound, "module file not found", modulePath)
 		}
-		return WrapError("prove", ErrIO, "cannot read module file", err)
+		return WrapError(tool, ErrIO, "cannot read module file", err)
 	}
 	return nil
 }
