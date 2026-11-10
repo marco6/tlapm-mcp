@@ -18,19 +18,15 @@ import (
 
 // CheckTool returns the MCP tool definition for check.
 func CheckTool() *mcp.Tool {
-	properties := targetProperties()
-	properties["module"] = map[string]any{
-		"type":        "string",
-		"description": "Path to the TLA+ module file (absolute or relative to the server working directory).",
-	}
 	return &mcp.Tool{
 		Name:        "check",
-		Description: "Parse and elaborate a TLA+ module without running proof backends. An optional line or inclusive range limits the check.",
+		Description: "Parse and elaborate a whole TLA+ module without running proof backends.",
 		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": properties,
-			"required":   []any{"module"},
-			"oneOf":      optionalTargetAlternatives(),
+			"type": "object",
+			"properties": map[string]any{
+				"module": moduleProperty(),
+			},
+			"required": []any{"module"},
 		},
 	}
 }
@@ -65,11 +61,12 @@ func parseCheckArgs(args map[string]any) (prover.CheckArgs, error) {
 	if !ok || module == "" {
 		return prover.CheckArgs{}, prover.WrapToolError("check", prover.ErrInvalidModule, "module path is required", "")
 	}
-	target, err := parseOptionalLineTarget(args)
-	if err != nil {
-		return prover.CheckArgs{}, prover.WrapToolError("check", prover.ErrInvalidRange, err.Error(), "")
+	for _, name := range []string{"line", "from", "to"} {
+		if _, exists := args[name]; exists {
+			return prover.CheckArgs{}, prover.WrapToolError("check", prover.ErrInvalidRequest, "check always checks the whole module and does not accept line, from, or to", "")
+		}
 	}
-	return prover.CheckArgs{Module: module, Target: target}, nil
+	return prover.CheckArgs{Module: module}, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -79,10 +76,7 @@ func parseCheckArgs(args map[string]any) (prover.CheckArgs, error) {
 // ProveTool returns the MCP tool definition for prove.
 func ProveTool() *mcp.Tool {
 	properties := targetProperties()
-	properties["module"] = map[string]any{
-		"type":        "string",
-		"description": "Path to the TLA+ module file (absolute or relative to the server working directory).",
-	}
+	properties["module"] = moduleProperty()
 	properties["cached"] = cachedProperty()
 	return &mcp.Tool{
 		Name:        "prove",
@@ -157,6 +151,13 @@ func toolErrorResult(err error) (*mcp.CallToolResult, error) {
 	}, nil
 }
 
+func moduleProperty() map[string]any {
+	return map[string]any{
+		"type":        "string",
+		"description": "Path to the TLA+ module file (absolute or relative to the server working directory).",
+	}
+}
+
 func cachedProperty() map[string]any {
 	return map[string]any{
 		"type":        "boolean",
@@ -213,18 +214,6 @@ func targetAlternatives() []any {
 	}
 }
 
-func optionalTargetAlternatives() []any {
-	return append(targetAlternatives(), map[string]any{
-		"not": map[string]any{
-			"anyOf": []any{
-				map[string]any{"required": []any{"line"}},
-				map[string]any{"required": []any{"from"}},
-				map[string]any{"required": []any{"to"}},
-			},
-		},
-	})
-}
-
 func parseLineTarget(args map[string]any) (prover.LineTarget, error) {
 	lineValue, hasLine := args["line"]
 	fromValue, hasFrom := args["from"]
@@ -254,16 +243,6 @@ func parseLineTarget(args map[string]any) (prover.LineTarget, error) {
 		return prover.LineTarget{}, fmt.Errorf("to must not be before from")
 	}
 	return prover.LineTarget{Range: &prover.LineRange{Start: from, End: to}}, nil
-}
-
-func parseOptionalLineTarget(args map[string]any) (prover.LineTarget, error) {
-	_, hasLine := args["line"]
-	_, hasFrom := args["from"]
-	_, hasTo := args["to"]
-	if !hasLine && !hasFrom && !hasTo {
-		return prover.LineTarget{}, nil
-	}
-	return parseLineTarget(args)
 }
 
 func positiveInteger(value any, name string) (int, error) {

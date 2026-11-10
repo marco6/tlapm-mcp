@@ -15,9 +15,10 @@
 The server is a thin wrapper around the `tlapm` binary. It:
 
 1. **Parses MCP requests** for `check` and `prove`.
-2. **Passes numeric targets to `tlapm`** using `--line N` for one line or `--toolbox FROM TO` for an inclusive range supplied as `from`/`to`.
-3. **Does not parse TLA+ source files**; `tlapm` handles source parsing.
-4. **Reports proof status conservatively**: success requires a zero TLAPM exit status and an explicit aggregate “all obligations proved” summary.
+2. **Checks whole modules** with `check`, which runs TLAPM in no-backend summary mode.
+3. **Passes numeric targets for `prove`** using `--line N` for one line or `--toolbox FROM TO` for an inclusive range supplied as `from`/`to`.
+4. **Does not parse TLA+ source files**; `tlapm` handles source parsing.
+5. **Reports proof status conservatively**: success requires a zero TLAPM exit status and an explicit aggregate “all obligations proved” summary.
 
 ## Adding a new tool
 
@@ -32,7 +33,7 @@ The server is a thin wrapper around the `tlapm` binary. It:
 # Full tests; integration tests require a working tlapm executable
 go test ./...
 
-# Native line/range targeting and non-TLAPM safety tests
+# Prove line/range targeting and non-TLAPM safety tests
 go test ./internal/prover/ -run 'TestLineTargetCommandArgs|TestBuildProveCmdUsesTLAPMDefaults|TestEnsureModuleExistsAcceptsAbsolutePath' -v -count=1
 
 # Integration tests (spawns tlapm)
@@ -41,16 +42,16 @@ go test ./internal/prover/ -run TestIntegration -v -count=1
 
 Integration tests embed fixtures and invoke TLAPM for proof scenarios. They require the native binary to be installed; without it, tests that expect proved results fail as environment errors.
 
-### Targeting source lines
+### Prove targeting
 
-Tool calls use one-based source lines and accept absolute module paths or paths relative to the server working directory. Provide either one `line` or both `from` and `to` in an MCP call:
+`prove` calls use one-based source lines and accept absolute module paths or paths relative to the server working directory. Provide either one `line` or both `from` and `to`:
 
 ```jsonc
 { "module": "Spec.tla", "line": 35 }
 { "module": "Spec.tla", "from": 35, "to": 42 }
 ```
 
-`tlapm` receives a single line as `--line N` and an inclusive range as `--toolbox FROM TO`.
+`tlapm` receives a single line as `--line N` and an inclusive range as `--toolbox FROM TO`. `check` has no target form and always checks the whole module.
 
 The MCP passes these arguments directly to `tlapm`; it never scans module contents.
 
