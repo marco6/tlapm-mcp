@@ -107,45 +107,9 @@ Single lines use `--line N`; ranges use `--toolbox FROM TO`.
 
 The server reports `success: true` only when `tlapm` exits successfully and emits an aggregate `[INFO]: All N obligations proved.` line with `N > 0`. A zero-obligation summary is returned as `success: false` with `error_code: "NO_OBLIGATIONS"`; it does not confirm that the selected target was proved. A message that only says an individual obligation was proved is not sufficient. `obligation_count` is the total generated count. `obligations` contains only unresolved obligations, with their source line, status, and a failure reason when available. `error_code` distinguishes proof failures, timeouts, parse errors, and fingerprint errors.
 
-### `race`
-
-Try each method in the fixed method list documented below on one source line or an inclusive line range. Each candidate is passed to TLAPM with `--method`; at most two calls run in parallel, and each method reports its own result, including unavailable methods. An explicit `BY` method in the TLA⁺ proof takes precedence over this default, so `race` only compares candidates for obligations without an explicit proof method.
-
-```jsonc
-{
-  "module": "/path/to/Spec.tla",
-  "line": 28,                           // alternatively use "from": 28, "to": 34
-  "cached": true
-}
-```
-
-`line` is passed as `--line N`; `from` and `to` are passed as `--toolbox FROM TO`.
-
-**Returns:**
-
-```jsonc
-{
-  "fastest": {
-    "solver": "smt",
-    "success": true,
-    "total_time_seconds": 0.087
-  },
-  "results": [
-    { "solver": "smt",   "success": true,  "total_time_seconds": 0.087, "obligations_failed": 0 },
-    { "solver": "zenon", "success": true,  "total_time_seconds": 0.152, "obligations_failed": 0 },
-    { "solver": "z3",    "success": false, "total_time_seconds": 1.203, "obligations_failed": 1, "error": "TLAPM output did not confirm that all obligations were proved", "error_code": "PROOF_FAILED", "obligations": [{ "line": 8, "status": "failed", "failure_reason": "false" }] }
-  ],
-  "obligation_count": 1
-}
-```
-
-`obligations_failed` is `-1` when the wrapper cannot establish a count. If no method proves the target, `fastest` contains the fastest failed result; it is not a successful proof.
-
-The response keeps `solver` as the result-field name for compatibility; its value identifies the attempted TLAPM method.
-
 ## Error Codes
 
-Invalid arguments and missing modules are returned as MCP tool errors with a JSON `code`. TLAPM execution failures use `error_code` in the `check` and `prove` results or on each `race` result.
+Invalid arguments and missing modules are returned as MCP tool errors with a JSON `code`. TLAPM execution failures use `error_code` in the `check` and `prove` results.
 
 | Code | Meaning |
 |------|---------|
@@ -175,23 +139,6 @@ Targets are one-based source line numbers, not theorem names or proof-step paths
 
 Absolute module paths and paths relative to the server working directory are accepted. The MCP does not inspect module contents; `tlapm` interprets the source and target.
 
-## Race Method Reference
-| Method | Description |
-|--------|-------------|
-| `smt` | TLAPM's default SMT method (usually Z3 via SMTLIB) |
-| `z3` | Z3 method |
-| `zenon` | Zenon tableau prover |
-| `auto` | Isabelle with "auto" tactic |
-| `blast` | Isabelle with "blast" tactic |
-| `force` | Isabelle with "force" tactic |
-| `cvc4` | CVC4 |
-| `yices` | Yices |
-| `verit` | VeriT |
-| `spass` | SPASS |
-| `zipper` | Zipperposition |
-| `ls4` | LS4 temporal logic decision procedure |
-| `fail` | Dummy — always fails (useful for testing) |
-
 ## Cached Results
 
 tlapm caches proof results in fingerprint files (`.tlacache/`). Cached results are used by default:
@@ -201,7 +148,7 @@ tlapm caches proof results in fingerprint files (`.tlacache/`). Cached results a
 
 ## Obligation diagnostics
 
-`prove` and `race` include only unresolved obligations. Each contains a source line and status, with a failure reason when available; successful obligations are represented by the aggregate counts and result status.
+`prove` includes only unresolved obligations. Each contains a source line and status, with a failure reason when available; successful obligations are represented by the aggregate counts and result status.
 
 ## Example interactions
 
@@ -228,7 +175,7 @@ go build -o tlapm-mcp ./cmd/tlapm-mcp/
 go run ./cmd/tlapm-mcp/
 ```
 
-The binary communicates over MCP stdio as a long-lived process. Every `prove` and `race` call requires exactly one of `line` or inclusive `from`/`to`; proof method selection belongs in the module's `BY` clause.
+The binary communicates over MCP stdio as a long-lived process. Every `prove` call requires exactly one of `line` or inclusive `from`/`to`; proof method selection belongs in the module's `BY` clause.
 
 ### Opencode
 
@@ -260,7 +207,7 @@ Or with the compiled binary:
 }
 ```
 
-The caller provides exactly one of `line` or inclusive `from`/`to` in each `prove` / `race` tool call:
+The caller provides exactly one of `line` or inclusive `from`/`to` in each `prove` tool call:
 
 ```jsonc
 // One line -> tlapm --line N
@@ -288,5 +235,3 @@ Connect via OMP's MCP server config:
   }
 }
 ```
-
-**Tip:** `race` tries the fixed method list in the Solver Reference; it does not discover which methods are installed. `tlapm --config` can help diagnose the local TLAPM environment, but availability is reported by each race result.

@@ -7,7 +7,7 @@ Read the top-level `.kb/agents.md` file before continuing below.
 
 # Overview
 
-The `server/` package creates the MCP server instance, registers the `check`, `prove`, and `race` tools, and manages stdio transport.
+The `server/` package creates the MCP server instance, registers the `check` and `prove` tools, and manages stdio transport.
 
 
 # Directory

@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"reflect"
 	"testing"
 	"time"
 )
@@ -184,32 +183,6 @@ func TestProveReturnsTLAPMNotFound(t *testing.T) {
 	var tlapmErr *TLAPMError
 	if !errors.As(err, &tlapmErr) || tlapmErr.Code != ErrTLAPMNotFound {
 		t.Fatalf("Prove error = %v, want TLAPM_NOT_FOUND", err)
-	}
-}
-
-func TestRaceReturnsTLAPMNotFound(t *testing.T) {
-	t.Setenv("PATH", t.TempDir())
-	_, err := NewWithFS(testdataFS).Race(context.Background(), RaceArgs{
-		Module:  "testdata/hard_proofs.tla",
-		Target:  LineTarget{Line: 1},
-		FPModes: FPDefault,
-	})
-	var tlapmErr *TLAPMError
-	if !errors.As(err, &tlapmErr) || tlapmErr.Code != ErrTLAPMNotFound {
-		t.Fatalf("Race error = %v, want TLAPM_NOT_FOUND", err)
-	}
-}
-
-func TestBuildRaceCmdArgsUsesMethodFlag(t *testing.T) {
-	args := RaceArgs{
-		Module:  "Spec.tla",
-		Target:  LineTarget{Range: &LineRange{Start: 4, End: 7}},
-		FPModes: FPNo,
-	}
-	got := buildRaceCmdArgs("blast", args)
-	want := []string{"--timing", "--method", "blast", "--toolbox", "4", "7", "--nofp", "Spec.tla"}
-	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("buildRaceCmdArgs() = %v, want %v", got, want)
 	}
 }
 

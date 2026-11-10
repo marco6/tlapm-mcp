@@ -11,13 +11,12 @@ import (
 	"github.com/tlaplus/tlapm-mcp/internal/prover"
 )
 
-func TestProofToolsExposeFlattenedTargetsAndOptions(t *testing.T) {
+func TestProveToolExposesFlattenedTargetsAndOptions(t *testing.T) {
 	tools := []struct {
 		name string
 		tool *mcp.Tool
 	}{
 		{name: "prove", tool: ProveTool()},
-		{name: "race", tool: RaceTool()},
 	}
 	for _, tt := range tools {
 		t.Run(tt.name, func(t *testing.T) {
@@ -116,7 +115,7 @@ func TestInvalidToolArgumentsHaveStructuredErrorCodes(t *testing.T) {
 		{
 			name: "missing module",
 			parse: func() error {
-				_, err := parseRaceArgs(map[string]any{"line": float64(8)})
+				_, err := parseProveArgs(map[string]any{"line": float64(8)})
 				return err
 			},
 			code: prover.ErrInvalidModule,
@@ -160,13 +159,6 @@ func TestParseCachedOption(t *testing.T) {
 			name: "prove",
 			parse: func(args map[string]any) (prover.FPMode, error) {
 				parsed, err := parseProveArgs(args)
-				return parsed.FPModes, err
-			},
-		},
-		{
-			name: "race",
-			parse: func(args map[string]any) (prover.FPMode, error) {
-				parsed, err := parseRaceArgs(args)
 				return parsed.FPModes, err
 			},
 		},
