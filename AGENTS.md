@@ -7,7 +7,7 @@ Read the top-level `.kb/agents.md` file before continuing below.
 
 # Overview
 
-tlapm-mcp exposes two tools: `check` and `prove`. `check` parses and elaborates a whole module without launching backends; `prove` requires one source line or an inclusive line range. The MCP does not parse TLA+ source; it parses TLAPM output. The architecture is split across command entry points (thin), server setup, RPC handlers/tool definitions, and core TLAPM orchestration.
+tlapm-mcp exposes one tool: `prove`. It runs TLAPM proof backends for a selected source line or an inclusive line range. The MCP does not parse TLA+ source; it parses TLAPM output. Parse/elaboration checking, renaming, and other language actions are delegated to the TLA+ LSP (`tlapm lsp`). The architecture is split across command entry points (thin), server setup, RPC handlers/tool definitions, and core TLAPM orchestration.
 
 
 # Important
@@ -15,7 +15,7 @@ tlapm-mcp exposes two tools: `check` and `prove`. `check` parses and elaborates 
 - The server communicates over MCP stdio; tool I/O is JSON via stdin/stdout.
 - All timing values are in seconds (floats), never milliseconds.
 - Cached proof results are controlled by `cached` (`true` by default; `false` disables caching).
-- `prove` requires exactly one target form: `line`, or inclusive `from` and `to` values. `check` accepts only `module` and always checks the whole module.
+- `prove` requires exactly one target form: `line`, or inclusive `from` and `to` values.
 
 
 # Directory
@@ -23,7 +23,7 @@ tlapm-mcp exposes two tools: `check` and `prove`. `check` parses and elaborates 
 - `cmd/` - Binary entry point for the MCP server.
 - `internal/` - Core internal packages: server setup, RPC handlers, and prover logic.
 - `testcases/` - Copy of testdata for manual testing.
-- `skills/` - Agent skill packs; `skills/tlapm-mcp/SKILL.md` documents the `check`/`prove` workflow.
+- `skills/` - Agent skill packs; `skills/tlapm-mcp/SKILL.md` documents the `prove` workflow and the TLA+ LSP division of labor.
 - `go.mod` - Go module definition.
 - `go.sum` - Go dependency checksums.
 - `README.md` - Project readme with tool schemas and examples.

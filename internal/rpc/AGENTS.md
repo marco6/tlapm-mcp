@@ -7,9 +7,9 @@ Read the top-level `.kb/agents.md` file before continuing below.
 
 # Overview
 
-The `rpc/` package contains the `check` and `prove` tool definitions, handlers, and argument parsers. Both require a module; `check` always checks the whole module, while `prove` requires either one numeric `line` or an inclusive `from`/`to` pair. Invalid inputs and TLAPM failures are returned with stable error codes in JSON.
+The `rpc/` package contains the `prove` tool definition, handler, and argument parser. It requires a module plus either one numeric `line` or an inclusive `from`/`to` pair. Invalid inputs and TLAPM failures are returned with stable error codes in JSON.
 
 
 # Directory
 
-- `handlers.go` - `check`/`prove` definitions and handlers, target schema helpers, and argument parsing.
+- `handlers.go` - `prove` definition and handler, target schema helpers, and argument parsing.

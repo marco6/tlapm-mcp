@@ -7,7 +7,7 @@ Read the top-level `.kb/agents.md` file before continuing below.
 
 # Overview
 
-The `internal/` directory houses the core business logic of tlapm-mcp. It coordinates MCP server setup, tool handler registration, and TLAPM parse, elaboration, and proof orchestration. These packages are not part of tlapm-mcp's public API and are consumed only by the entry point and tests.
+The `internal/` directory houses the core business logic of tlapm-mcp. It coordinates MCP server setup, tool handler registration, and TLAPM proof orchestration. These packages are not part of tlapm-mcp's public API and are consumed only by the entry point and tests.
 
 
 # Architecture
@@ -28,7 +28,7 @@ flowchart LR
 # Directory
 
 - `server/` - MCP server setup: creates server instance, registers tools, manages the prover.
-- `rpc/` - `check` and `prove` tool schemas, handlers, and argument parsing.
+- `rpc/` - `prove` tool schema, handler, and argument parsing.
 - `prover/` - TLAPM invocation, output parsing, fingerprint caching, and line/range flag construction; module contents are not read or parsed by the MCP.
 
 

@@ -13,63 +13,6 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// check
-// ---------------------------------------------------------------------------
-
-// CheckTool returns the MCP tool definition for check.
-func CheckTool() *mcp.Tool {
-	return &mcp.Tool{
-		Name:        "check",
-		Description: "Parse and elaborate a whole TLA+ module without running proof backends.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"module": moduleProperty(),
-			},
-			"required": []any{"module"},
-		},
-	}
-}
-
-// CheckHandler is the tool handler for check.
-func CheckHandler(p *prover.Prover) func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		var args map[string]any
-		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return toolErrorResult(prover.WrapToolError("check", prover.ErrInvalidRequest, "invalid tool arguments", err.Error()))
-		}
-		ca, err := parseCheckArgs(args)
-		if err != nil {
-			return toolErrorResult(err)
-		}
-		result, err := p.Check(ctx, ca)
-		if err != nil {
-			return toolErrorResult(err)
-		}
-		data, err := json.Marshal(result)
-		if err != nil {
-			return nil, err
-		}
-		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
-		}, nil
-	}
-}
-
-func parseCheckArgs(args map[string]any) (prover.CheckArgs, error) {
-	module, ok := args["module"].(string)
-	if !ok || module == "" {
-		return prover.CheckArgs{}, prover.WrapToolError("check", prover.ErrInvalidModule, "module path is required", "")
-	}
-	for _, name := range []string{"line", "from", "to"} {
-		if _, exists := args[name]; exists {
-			return prover.CheckArgs{}, prover.WrapToolError("check", prover.ErrInvalidRequest, "check always checks the whole module and does not accept line, from, or to", "")
-		}
-	}
-	return prover.CheckArgs{Module: module}, nil
-}
-
-// ---------------------------------------------------------------------------
 // prove
 // ---------------------------------------------------------------------------
 

@@ -29,26 +29,7 @@ Replace both paths with the repository location. Then ask the client: “Prove l
 
 ## MCP Tools
 
-### `check`
-
-Parse and elaborate a whole module without launching proof backends. `check` does not accept `line`, `from`, or `to`; use `prove` to select source lines.
-
-```jsonc
-{
-  "module": "/path/to/Spec.tla"
-}
-```
-
-The check runs TLAPM in no-backend summary mode. `success` means parsing and elaboration completed; it does not mean the proof obligations were proved. Diagnostics contain `line`, `column`, `severity`, and `message`; a zero line or column means TLAPM did not report that location. `obligation_count` is included when TLAPM reports it. For an abnormal TLAPM exit, the response also includes `exit_code`, `stderr`, and a distinct `error_code`.
-
-```jsonc
-{
-  "success": true,
-  "module": "/path/to/Spec.tla",
-  "diagnostics": [],
-  "obligation_count": 2
-}
-```
+The server exposes a single tool: `prove`. Parsing and elaboration checking, renaming, and other language actions are handled by the TLA+ LSP (`tlapm lsp`), not by this server.
 
 ### `prove`
 
@@ -116,7 +97,7 @@ Each warning is a non-fatal hint: at the given line, the proof step would be bet
 
 ## Error Codes
 
-Invalid arguments and missing modules are returned as MCP tool errors with a JSON `code`. TLAPM execution failures use `error_code` in the `check` and `prove` results.
+Invalid arguments and missing modules are returned as MCP tool errors with a JSON `code`. TLAPM execution failures use `error_code` in the `prove` result.
 
 | Code | Meaning |
 |------|---------|

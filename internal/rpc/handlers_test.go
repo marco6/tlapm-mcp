@@ -53,55 +53,6 @@ func TestProveToolExposesFlattenedTargetsAndOptions(t *testing.T) {
 	}
 }
 
-func TestCheckToolExposesOnlyModule(t *testing.T) {
-	tool := CheckTool()
-	schema := tool.InputSchema.(map[string]any)
-	properties := schema["properties"].(map[string]any)
-	if !reflect.DeepEqual(schema["required"], []any{"module"}) {
-		t.Fatalf("required = %#v, want only module", schema["required"])
-	}
-	if len(properties) != 1 {
-		t.Fatalf("properties = %#v, want only module", properties)
-	}
-	module, ok := properties["module"].(map[string]any)
-	if !ok || module["type"] != "string" {
-		t.Errorf("module schema = %#v, want string", properties["module"])
-	}
-	for _, removed := range []string{"line", "from", "to", "cached"} {
-		if _, ok := properties[removed]; ok {
-			t.Errorf("check schema should not expose %q", removed)
-		}
-	}
-	if alternatives, ok := schema["oneOf"]; ok {
-		t.Errorf("check schema should not have target alternatives: %#v", alternatives)
-	}
-}
-
-func TestParseCheckArgs(t *testing.T) {
-	for _, tt := range []struct {
-		name    string
-		args    map[string]any
-		want    prover.CheckArgs
-		wantErr bool
-	}{
-		{name: "whole module", args: map[string]any{"module": "Spec.tla"}, want: prover.CheckArgs{Module: "Spec.tla"}},
-		{name: "line target", args: map[string]any{"module": "Spec.tla", "line": float64(9)}, wantErr: true},
-		{name: "range target", args: map[string]any{"module": "Spec.tla", "from": float64(9), "to": float64(13)}, wantErr: true},
-		{name: "incomplete range", args: map[string]any{"module": "Spec.tla", "from": float64(9)}, wantErr: true},
-		{name: "missing module", args: map[string]any{}, wantErr: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseCheckArgs(tt.args)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("parseCheckArgs() error = %v, wantErr %v", err, tt.wantErr)
-			}
-			if err == nil && !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("parseCheckArgs() = %+v, want %+v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestInvalidToolArgumentsHaveStructuredErrorCodes(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -123,14 +74,6 @@ func TestInvalidToolArgumentsHaveStructuredErrorCodes(t *testing.T) {
 				return err
 			},
 			code: prover.ErrInvalidModule,
-		},
-		{
-			name: "check target removed",
-			parse: func() error {
-				_, err := parseCheckArgs(map[string]any{"module": "Spec.tla", "line": float64(8)})
-				return err
-			},
-			code: prover.ErrInvalidRequest,
 		},
 	}
 	for _, tt := range tests {
