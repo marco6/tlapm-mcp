@@ -4,7 +4,7 @@ An MCP server that wraps the [TLA⁺ Proof Manager (tlapm)](https://github.com/t
 
 ## Quick start
 
-Requirements: Go 1.24+ and the `tlapm` executable available on `PATH`.
+Requirements: Go 1.24+ and a `tlapm` executable (1.6.0-pre or newer) available on `PATH`. The server runs every `prove` invocation with `--strict`, which older `tlapm` releases do not support.
 
 Build the server from the repository root:
 
@@ -96,7 +96,7 @@ Single lines use `--line N`; ranges use `--toolbox FROM TO`.
 }
 ```
 
-The server reports `success: true` only when `tlapm` exits successfully and emits an aggregate `[INFO]: All N obligations proved.` line with `N > 0`. A zero-obligation summary is returned as `success: false` with `error_code: "NO_OBLIGATIONS"`; it does not confirm that the selected target was proved. A message that only says an individual obligation was proved is not sufficient. `obligation_count` is the total generated count. `obligations` contains only unresolved obligations, with their source line, status, and a failure reason when available. `error_code` distinguishes proof failures, timeouts, parse errors, and fingerprint errors.
+The server runs every `prove` invocation with `--strict`: failed obligations, targets that generate no obligations, and proofs with missing or omitted steps all exit non-zero. `success: true` therefore means the selected target is fully proved: `tlapm` exited zero and emitted an aggregate `[INFO]: All N obligations proved.` line with no errors. A zero-obligation target returns `success: false` with `error_code: "NO_OBLIGATIONS"`, and a proof with missing or omitted steps returns `error_code: "PROOF_INCOMPLETE"`. `obligation_count` is the total generated count. `obligations` contains only unresolved obligations, with their source line, status, and a failure reason when available. `error_code` distinguishes proof failures, timeouts, parse errors, and fingerprint errors.
 
 When a proof succeeds but an obligation needed a backend fallback, the result includes compact `warnings`:
 
@@ -124,6 +124,8 @@ Invalid arguments and missing modules are returned as MCP tool errors with a JSO
 | `INVALID_REQUEST` | Tool arguments could not be decoded or validated. |
 | `TLAPM_PARSE_ERROR` | TLAPM could not parse or elaborate the module. |
 | `PROOF_FAILED` | One or more generated proof obligations failed. |
+| `NO_OBLIGATIONS` | The selected target generated no proof obligations (rejected by `--strict`). |
+| `PROOF_INCOMPLETE` | The target's proof has missing or omitted proof steps (rejected by `--strict`). |
 | `BACKEND_TIMEOUT` | A proof backend timed out or was interrupted. |
 | `BACKEND_FAILURE` | A proof backend exited with an error unrelated to an ordinary failed obligation. |
 | `FINGERPRINT_CORRUPTED` | TLAPM reported a corrupted fingerprint cache. |
@@ -143,6 +145,8 @@ Invalid arguments and missing modules are returned as MCP tool errors with a JSO
 
 - `line` selects one source line and becomes `tlapm --line N`.
 - `from` and `to` select an inclusive range and become `tlapm --toolbox FROM TO`.
+
+Every `prove` invocation also passes `--strict`, so a "successful" run always means the obligations of the selected target were generated and proved.
 
 Absolute module paths and paths relative to the server working directory are accepted. The MCP does not inspect module contents; `tlapm` interprets the source and target.
 

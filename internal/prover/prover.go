@@ -146,7 +146,7 @@ func (p *Prover) buildProveCmd(ctx context.Context, args ProveArgs) (*exec.Cmd, 
 	if err := args.Target.validate(); err != nil {
 		return nil, err
 	}
-	cmdArgs := []string{"--timing"}
+	cmdArgs := []string{"--timing", "--strict"}
 	cmdArgs = args.Target.appendCommandArgs(cmdArgs)
 	switch args.FPModes {
 	case FPNo:
