@@ -18,7 +18,7 @@ The server is a thin wrapper around the `tlapm` binary. It:
 2. **Checks whole modules** with `check`, which runs TLAPM in no-backend summary mode.
 3. **Passes numeric targets for `prove`** using `--line N` for one line or `--toolbox FROM TO` for an inclusive range supplied as `from`/`to`.
 4. **Does not parse TLA+ source files**; `tlapm` handles source parsing.
-5. **Reports proof status conservatively**: success requires a zero TLAPM exit status and an explicit aggregate “all obligations proved” summary.
+5. **Reports proof status conservatively**: every `prove` invocation runs under `tlapm --strict`, and success additionally requires an explicit aggregate “all obligations proved” summary.
 
 ## Adding a new tool
 
@@ -51,7 +51,7 @@ Integration tests embed fixtures and invoke TLAPM for proof scenarios. They requ
 { "module": "Spec.tla", "from": 35, "to": 42 }
 ```
 
-`tlapm` receives a single line as `--line N` and an inclusive range as `--toolbox FROM TO`. `check` has no target form and always checks the whole module.
+`tlapm` receives a single line as `--line N` and an inclusive range as `--toolbox FROM TO`; every `prove` invocation also passes `--timing --strict`, so a `tlapm` release that supports `--strict` (1.6.0-pre or newer) is required. `check` has no target form and always checks the whole module.
 
 The MCP passes these arguments directly to `tlapm`; it never scans module contents.
 

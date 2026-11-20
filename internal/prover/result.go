@@ -167,16 +167,6 @@ func completedObligationCount(output string) (int, bool) {
 	return count, found
 }
 
-func hasZeroObligationCompletion(output string) bool {
-	for _, line := range strings.Split(output, "\n") {
-		if strings.HasPrefix(strings.TrimSpace(line), "[ERROR]:") {
-			return false
-		}
-	}
-	count, found := completedObligationCount(output)
-	return found && count == 0
-}
-
 func allObligationsProved(output string) bool {
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)

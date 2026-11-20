@@ -34,8 +34,8 @@ func TestParseResultRequiresAggregateProofCompletion(t *testing.T) {
 			wantCode: string(ErrOutputIncomplete),
 		},
 		{
-			name:     "zero obligations is not proof completion",
-			output:   "[INFO]: All 0 obligation proved.\n",
+			name:     "strict empty target is not proof completion",
+			output:   "[ERROR]: No proof obligation found for the selected target.\n[INFO]: All 0 obligation proved.\n",
 			wantCode: string(ErrNoObligations),
 		},
 		{
@@ -77,15 +77,6 @@ func TestAllObligationsProvedRejectsPartialAndConflictingOutput(t *testing.T) {
 	}
 }
 
-func TestHasZeroObligationCompletionRejectsErrors(t *testing.T) {
-	if !hasZeroObligationCompletion("[INFO]: All 0 obligations proved.\n") {
-		t.Fatal("hasZeroObligationCompletion() = false for zero-obligation completion")
-	}
-	if hasZeroObligationCompletion("[INFO]: All 0 obligations proved.\n[ERROR]: a proof obligation failed\n") {
-		t.Fatal("hasZeroObligationCompletion() = true with an error line")
-	}
-}
-
 func TestClassifyTLAPMOutputSeparatesFailureLayers(t *testing.T) {
 	for _, tt := range []struct {
 		name          string
@@ -94,6 +85,8 @@ func TestClassifyTLAPMOutputSeparatesFailureLayers(t *testing.T) {
 		want          ErrCode
 	}{
 		{name: "parse failure", output: `Error: Could not parse "Spec.tla" successfully.`, processExited: true, want: ErrTLAPMParse},
+		{name: "empty proof target (strict)", output: "[ERROR]: No proof obligation found for the selected target.\n", processExited: true, want: ErrNoObligations},
+		{name: "incomplete proof (strict)", output: "[ERROR]: Proof incomplete in module \"Spec\": 1 missing, 0 omitted proof step(s).\n", processExited: true, want: ErrProofIncomplete},
 		{name: "failed proof", output: "@!!BEGIN\n@!!type:obligation\n@!!id:1\n@!!status:failed\n@!!prover:smt\n@!!END", processExited: true, want: ErrProofFailed},
 		{name: "backend timeout", output: "@!!BEGIN\n@!!type:obligation\n@!!id:1\n@!!status:interrupted\n@!!prover:zenon\n@!!END", processExited: true, want: ErrBackendTimeout},
 		{name: "timeout reason", output: "@!!BEGIN\n@!!type:obligation\n@!!id:1\n@!!status:failed\n@!!prover:zenon\n@!!reason:timeout\n@!!END", processExited: true, want: ErrBackendTimeout},

@@ -23,14 +23,14 @@ Shared argument rules:
 - For `prove`, lines are one-based source lines. Never combine `line` with `from`/`to`.
 - For `prove`, `from` and `to` are inclusive, positive integers, and `to >= from`.
 - `cached` is `prove`-only, boolean, and defaults to `true`.
-- A `prove` single `line` becomes `tlapm --line N`; a range becomes `tlapm --toolbox FROM TO`. TLAPM, not the MCP, decides what those source lines mean.
+- A `prove` single `line` becomes `tlapm --line N`; a range becomes `tlapm --toolbox FROM TO`. Every `prove` invocation runs with `--strict`, so incomplete proofs, empty targets, and failed obligations are hard errors. TLAPM, not the MCP, decides what those source lines mean.
 
 ## Recommended workflow
 
 1. **Check before proving.** Call `check` with the whole module to catch syntax and elaboration errors without paying for backends. Fix `diagnostics` in the module first.
 2. **Read the actual source.** Locate the `THEOREM`, `LEMMA`, proof step, and `BY` clause with line numbers. Do not guess targets from theorem names.
-3. **Prove the smallest useful range.** Include the theorem statement and its proof. If a single line yields `NO_OBLIGATIONS`, widen to the inclusive range covering the step.
-4. **Interpret the result.** `success: true` requires an aggregate `All N obligations proved` summary with `N > 0`; a per-obligation success message is not enough.
+3. **Prove the smallest useful range.** Include the theorem statement and its proof.
+4. **Interpret the result.** TLAPM runs under `--strict`, so `success: true` means the selected target was fully proved; every other outcome returns `success: false` with an `error_code`.
 5. **Repair from unresolved obligations.** `obligations` lists only failures, each with a source `line`, `status`, and usually `failure_reason`. Read that line, then fix the statement, add intermediate steps, or expand definitions with `BY DEF`.
 6. **Use warnings only after success.** A `warning` such as `missing \`BY Zenon\`` is a non-fatal hint: adding that `BY` tactic to the indicated step avoids a failed backend on the next run.
 7. **Bypass cache after source changes.** Keep the default `cached: true` for iteration; pass `cached: false` after editing definitions or when a result looks stale.
@@ -55,7 +55,7 @@ Shared argument rules:
 { "module": "/abs/path/Spec.tla", "from": 35, "to": 42, "cached": false }
 ```
 
-A range can cover several obligations. Prefer it when the exact step line is unclear or when a single-line target reports zero obligations.
+A range can cover several obligations; prefer it when the exact step line is unclear.
 
 ## Result interpretation
 
@@ -94,7 +94,8 @@ A range can cover several obligations. Prefer it when the exact step line is unc
 }
 ```
 
-- `success: true` only when TLAPM exits zero, emits `[INFO]: All N obligations proved.` with `N > 0`, and emits no `[ERROR]:` lines.
+- `success: true` only when TLAPM exits zero under `--strict` with an aggregate `[INFO]: All N obligations proved.` line where `N > 0` and no `[ERROR]:` lines.
+- `success: true` covers **only the selected target**, not the whole module. Claims about other theorems need their own `prove` calls.
 - `obligation_count` is the total generated count.
 - `obligations` contains **only unresolved** obligations. Do not treat it as the full obligation list. Statuses are `failed`, `timeout`, `parse-error`, or `backend-error`; `failure_reason` is present when TLAPM supplies one.
 - `timing` and `total_time_seconds` are seconds; never milliseconds.
@@ -113,10 +114,11 @@ A range can cover several obligations. Prefer it when the exact step line is unc
 | `INVALID_REQUEST` | Arguments could not be decoded; `cached` was not boolean; `check` received `line`/`from`/`to`. | Send valid JSON with the documented types; omit targets from `check`. |
 | `TLAPM_PARSE_ERROR` | TLAPM could not parse or elaborate. | Fix the reported syntax/definition error, then `check` again. |
 | `PROOF_FAILED` | One or more obligations failed. | Inspect `obligations[].line` and `failure_reason`; fix the step or proof. |
+| `PROOF_INCOMPLETE` | The target's proof has missing or omitted proof steps (`--strict` rejects them). | Complete the reported missing steps, or mark deliberately skipped steps `PROOF OMITTED`; then re-prove. |
 | `BACKEND_TIMEOUT` | A proof backend timed out or was interrupted. | Narrow the target, split the proof, and simplify before retrying. |
 | `BACKEND_FAILURE` | A backend errored for a reason other than an ordinary failed obligation. | Narrow/split the proof; add an explicit `BY` tactic when one backend is known to work. |
 | `FINGERPRINT_CORRUPTED` | TLAPM's fingerprint cache is corrupt. | Retry with `cached: false`; if it persists, remove only the affected module's `.tlacache` entry. |
-| `NO_OBLIGATIONS` | The target generated zero obligations, so nothing was proved. | Widen the range to include the theorem/proof step; do not report success. |
+| `NO_OBLIGATIONS` | The target generated zero obligations (`--strict` rejects empty targets); nothing was proved. | Widen the range to include the theorem statement and its proof. |
 | `MCP_REQUEST_TIMEOUT` / `MCP_REQUEST_CANCELLED` | The caller timed out or cancelled. | Retry with a narrower target. |
 | `TLAPM_EXIT_NO_DIAGNOSTICS` | TLAPM exited abnormally without a diagnostic. | Inspect `stderr` from `check` or rerun with a narrower target. |
 | `TLAPM_FAILURE` / `TLAPM_OUTPUT_INCOMPLETE` | TLAPM failed or produced incomplete output. | Rerun, then narrow/split; inspect `proof_text` and stderr. |
@@ -143,8 +145,9 @@ Use the unresolved obligation's `line` as the anchor:
 ## Guardrails
 
 - Never claim a proof succeeded from a successful `check`; it only parses and elaborates.
-- Never claim success from an individual obligation message. Require `success: true` and the aggregate count.
+- Never claim success from an individual obligation message; require `success: true` (TLAPM runs under `--strict`, so success implies the aggregate completion summary).
 - Never claim success when `obligation_count` is zero or `error_code` is `NO_OBLIGATIONS`.
+- Never generalize a successful `prove` to the whole module; it covers only the selected target.
 - Do not pass theorem names, `--line`, `--toolbox`, `--nofp`, or other TLAPM flags in `module`; use `line`/`from`/`to` only with `prove`.
 - Do not send `line`, `from`, or `to` to `check`; it always checks the whole module and rejects those fields.
 - Do not expect the MCP to modify the module. Edit the `.tla` file with the normal file tools, then call `check`/`prove` again.
@@ -161,6 +164,6 @@ These fixtures are representative targets when the server runs with this reposit
 // Prove the theorem and its BY clause
 { "module": "testcases/arithmetic_theorem.tla", "from": 6, "to": 8 }
 
-// A fixture with a deliberately failing theorem at lines 45-50
-{ "module": "testcases/arithmetic.tla", "from": 45, "to": 50 }
+// Returns NO_OBLIGATIONS: the target selects no proof step
+{ "module": "testcases/failing.tla", "line": 48 }
 ```

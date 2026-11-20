@@ -154,6 +154,39 @@ func TestProve_FailedProofReturnsCompactObligation(t *testing.T) {
 	}
 }
 
+// TestProve_IncompleteProofReturnsDistinctCode verifies that a target whose
+// proof has a missing step is rejected by tlapm's --strict mode and surfaces
+// as PROOF_INCOMPLETE rather than a successful run.
+func TestProve_IncompleteProofReturnsDistinctCode(t *testing.T) {
+	module := filepath.Join(t.TempDir(), "Gap.tla")
+	source := "---- MODULE Gap ----\n" +
+		"EXTENDS Naturals, TLAPS\n" +
+		"THEOREM T ==\n" +
+		"  ASSUME NEW x \\in Nat, NEW y \\in Nat, x < y\n" +
+		"  PROVE  x < y + 1\n" +
+		"  <1>1. x <= y\n" +
+		"  <1>2. QED BY <1>1\n" +
+		"====\n"
+	if err := os.WriteFile(module, []byte(source), 0o600); err != nil {
+		t.Fatalf("write module: %v", err)
+	}
+
+	result, err := New().Prove(context.Background(), ProveArgs{
+		Module:  module,
+		Target:  LineTarget{Range: &LineRange{Start: 1, End: 8}},
+		FPModes: FPNo,
+	})
+	if err != nil {
+		t.Fatalf("Prove() error = %v", err)
+	}
+	if result.Success {
+		t.Fatal("Prove() succeeded for a proof with a missing step")
+	}
+	if result.ErrorCode != string(ErrProofIncomplete) {
+		t.Errorf("ErrorCode = %q, want %q", result.ErrorCode, ErrProofIncomplete)
+	}
+}
+
 func TestBuildProveCmdUsesTLAPMDefaults(t *testing.T) {
 	p := New()
 	cmd, err := p.buildProveCmd(context.Background(), ProveArgs{
@@ -163,7 +196,7 @@ func TestBuildProveCmdUsesTLAPMDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildProveCmd() error = %v", err)
 	}
-	want := []string{"--timing", "--line", "28", "Spec.tla"}
+	want := []string{"--timing", "--strict", "--line", "28", "Spec.tla"}
 	if !reflect.DeepEqual(cmd.Args[1:], want) {
 		t.Fatalf("prove args = %v, want %v", cmd.Args[1:], want)
 	}

@@ -41,6 +41,8 @@ const (
 	ErrTLAPMFailure     ErrCode = "TLAPM_FAILURE"
 	// ErrNoObligations is returned when the selected target produces no proof obligations.
 	ErrNoObligations ErrCode = "NO_OBLIGATIONS"
+	// ErrProofIncomplete is returned when the target's proof has missing or omitted proof steps.
+	ErrProofIncomplete ErrCode = "PROOF_INCOMPLETE"
 	// ErrExitCode is retained for compatibility with older callers.
 	ErrExitCode ErrCode = "EXIT_CODE"
 	// ErrStep is returned when a step selector is invalid.
@@ -200,8 +202,13 @@ func classifyTLAPMOutput(output string, processExited bool) ErrCode {
 	if strings.Contains(lower, "backend errors processing") || strings.Contains(lower, "backend error") {
 		return ErrBackendFailure
 	}
-	if hasZeroObligationCompletion(output) {
+	// tlapm --strict: an explicit target that selected no obligation.
+	if strings.Contains(lower, "no proof obligation found for the selected target") {
 		return ErrNoObligations
+	}
+	// tlapm --strict: missing or omitted proof steps leave the proof incomplete.
+	if strings.Contains(lower, "proof incomplete in module") {
+		return ErrProofIncomplete
 	}
 	if processExited {
 		if !hasTLAPMDiagnostics(output) {
@@ -291,6 +298,8 @@ func errorMessage(code ErrCode) string {
 		return "proof backend failed"
 	case ErrNoObligations:
 		return "no proof obligations were generated for the target"
+	case ErrProofIncomplete:
+		return "the proof is incomplete: missing or omitted proof steps"
 	case ErrOutputIncomplete:
 		return "TLAPM output did not confirm a complete result"
 	case ErrTLAPMFailure:
