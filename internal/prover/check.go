@@ -49,6 +49,17 @@ func (p *Prover) Check(ctx context.Context, args CheckArgs) (CheckResult, error)
 		return CheckResult{}, err
 	}
 
+	release, err := acquireModuleLock(ctx, args.Module)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return CheckResult{}, RequestContextError("check", err)
+		}
+		lockErr := WrapError("check", ErrIO, "cannot acquire module lock", err)
+		LogError("check", lockErr)
+		return CheckResult{}, lockErr
+	}
+	defer release()
+
 	cmd := buildCheckCmd(ctx, args)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
