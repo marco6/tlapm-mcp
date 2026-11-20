@@ -15,6 +15,7 @@ tlapm-mcp exposes two tools: `check` and `prove`. `check` parses and elaborates 
 - The server communicates over MCP stdio; tool I/O is JSON via stdin/stdout.
 - All timing values are in seconds (floats), never milliseconds.
 - Cached proof results are controlled by `cached` (`true` by default; `false` disables caching).
+- `check` and `prove` share an advisory per-module `flock`: different modules run concurrently, while calls that share a module's fingerprint cache serialize across server processes on Unix via a sidecar lock file.
 - `prove` requires exactly one target form: `line`, or inclusive `from` and `to` values. `check` accepts only `module` and always checks the whole module.
 
 

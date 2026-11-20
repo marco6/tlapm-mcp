@@ -113,6 +113,17 @@ func (p *Prover) Prove(ctx context.Context, args ProveArgs) (Result, error) {
 		return Result{}, err
 	}
 
+	release, err := acquireModuleLock(ctx, args.Module)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return Result{}, RequestContextError("prove", err)
+		}
+		lockErr := WrapError("prove", ErrIO, "cannot acquire module lock", err)
+		LogError("prove", lockErr)
+		return Result{}, lockErr
+	}
+	defer release()
+
 	output, commandErr := cmd.CombinedOutput()
 	var toolErr error
 	if commandErr != nil {

@@ -133,6 +133,7 @@ Invalid arguments and missing modules are returned as MCP tool errors with a JSO
 | `TLAPM_EXIT_NO_DIAGNOSTICS` | TLAPM exited abnormally without a diagnostic. |
 | `TLAPM_FAILURE` / `TLAPM_OUTPUT_INCOMPLETE` | TLAPM failed or did not provide a complete result. |
 | `TLAPM_NOT_FOUND` / `SOLVER_UNAVAILABLE` | TLAPM or a requested solver is unavailable. |
+| `IO_ERROR` | The server could not create the module lock or cache directory. |
 
 ## Prove targeting
 
@@ -156,6 +157,18 @@ tlapm caches proof results in fingerprint files (`.tlacache/`). Cached results a
 
 - **`cached: true`** (default) — uses cached results and skips proven obligations.
 - **`cached: false`** — ignores existing cached results and recomputes, useful after definition changes.
+
+## Concurrency
+
+The MCP server executes concurrent tool calls. Before launching TLAPM, both `check` and `prove` acquire a module gate keyed by the module's cache name (the module file base name without `.tla`, matching `.tlacache/<Module>.tlaps`):
+
+- Calls for **different modules** run in parallel.
+- Calls for the **same module** serialize, including `check` + `prove` combinations, because TLAPM's fingerprint file is truncated, rewritten through a shared `.tmp` file, and renamed. `cached: false` does not make same-module calls safe; `--nofp` still rewrites fingerprints.
+- A call waiting for its module gate honors MCP cancellation and deadlines.
+
+The gate is an advisory `flock` on a sidecar file under `<TLAPM_CACHE_DIR>/.tlapm-mcp-locks/` (default `.tlacache/.tlapm-mcp-locks/`) on Linux, macOS, and BSD. All calls, including calls in one server process, contend on the same lock file, so separate MCP server processes sharing a cache directory cannot run the same module concurrently. The sidecar is intentional: TLAPM replaces the fingerprint file by rename, so locking the fingerprint path itself would not survive the inode change. Lock files are never removed; removing one while another process waits on it allows a third process to bypass the lock. TLAPM does not take these locks, so a `tlapm` process started outside the MCP is not coordinated. If `flock` fails (for example, on a filesystem without advisory-lock support), the call returns `IO_ERROR` rather than running unsynchronized. Platforms without `flock` run without a module lock.
+
+Concurrency is not capped: every run starts its own TLAPM process and worker threads, so parallel calls can oversubscribe the machine.
 
 ## Obligation diagnostics
 
