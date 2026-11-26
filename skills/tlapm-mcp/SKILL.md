@@ -123,6 +123,7 @@ A range can cover several obligations; prefer it when the exact step line is unc
 | `TLAPM_EXIT_NO_DIAGNOSTICS` | TLAPM exited abnormally without a diagnostic. | Inspect `stderr` from `check` or rerun with a narrower target. |
 | `TLAPM_FAILURE` / `TLAPM_OUTPUT_INCOMPLETE` | TLAPM failed or produced incomplete output. | Rerun, then narrow/split; inspect `proof_text` and stderr. |
 | `TLAPM_NOT_FOUND` | The `tlapm` executable is not on the server's `PATH`. | Environment problem; do not retry the same call. |
+| `IO_ERROR` | The server could not create the module lock or cache directory. | Check `TLAPM_CACHE_DIR` and its permissions. |
 | `SOLVER_UNAVAILABLE` | A required solver is missing or incompatible. | Environment problem; install the solver or change the proof's tactic. |
 
 ## Caching
@@ -131,6 +132,7 @@ A range can cover several obligations; prefer it when the exact step line is unc
 - `cached: false` passes `--nofp`, ignores existing fingerprints, and recomputes.
 - Keep caching on during normal iteration. Turn it off after changing definitions, hypotheses, or proof steps, or when a cached result appears inconsistent.
 - Do not edit or delete cache files as a first response to a failure. Only address the cache after `FINGERPRINT_CORRUPTED`, and only for the affected module.
+- Calls for different modules may run concurrently; calls for the same module are serialized (including `check` and `prove`) across MCP server processes on Unix via an advisory sidecar lock, because TLAPM's fingerprint cache is per module. Do not assume same-module calls can overlap.
 
 ## Repairing a failed proof
 
