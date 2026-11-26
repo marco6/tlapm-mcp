@@ -12,4 +12,4 @@ The `server/` package creates the MCP server instance, registers the `check` and
 
 # Directory
 
-- `server.go` - Server setup: `New()`, `RegisterTools()`, `Run()`, and the `Start()` entry point.
+- `server.go` - Server setup: `New()`, `RegisterTools()`, `Run()`, and the `Start(prover)` entry point that runs the given configured prover.

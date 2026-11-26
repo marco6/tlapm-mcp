@@ -60,7 +60,7 @@ func (p *Prover) Check(ctx context.Context, args CheckArgs) (CheckResult, error)
 	}
 	defer release()
 
-	cmd := buildCheckCmd(ctx, args)
+	cmd := p.buildCheckCmd(ctx, args)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -106,8 +106,10 @@ func (p *Prover) Check(ctx context.Context, args CheckArgs) (CheckResult, error)
 	return result, nil
 }
 
-func buildCheckCmd(ctx context.Context, args CheckArgs) *exec.Cmd {
-	return exec.CommandContext(ctx, "tlapm", "--summary", "-N", args.Module)
+func (p *Prover) buildCheckCmd(ctx context.Context, args CheckArgs) *exec.Cmd {
+	cmdArgs := p.appendIncludeArgs(nil)
+	cmdArgs = append(cmdArgs, "--summary", "-N", args.Module)
+	return exec.CommandContext(ctx, "tlapm", cmdArgs...)
 }
 
 var (

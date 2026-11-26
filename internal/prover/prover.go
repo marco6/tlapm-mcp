@@ -15,6 +15,9 @@ type Prover struct {
 	// FS is used to validate module paths; module contents are never read.
 	// When nil, os.DirFS(".") is used.
 	FS fs.FS
+	// IncludeDirs are passed to tlapm as repeated -I DIR options, adding
+	// directories to its library search path. Applied to check and prove.
+	IncludeDirs []string
 }
 
 // New creates a new Prover with the default filesystem (os.DirFS(".")).
@@ -92,6 +95,14 @@ func (t LineTarget) appendCommandArgs(args []string) []string {
 	return append(args, "--toolbox", strconv.Itoa(t.Range.Start), strconv.Itoa(t.Range.End))
 }
 
+// appendIncludeArgs adds the configured library search path to tlapm args.
+func (p *Prover) appendIncludeArgs(args []string) []string {
+	for _, dir := range p.IncludeDirs {
+		args = append(args, "-I", dir)
+	}
+	return args
+}
+
 // ProveArgs holds the arguments for a prove invocation.
 type ProveArgs struct {
 	Module  string     // path to .tla file
@@ -157,7 +168,8 @@ func (p *Prover) buildProveCmd(ctx context.Context, args ProveArgs) (*exec.Cmd, 
 	if err := args.Target.validate(); err != nil {
 		return nil, err
 	}
-	cmdArgs := []string{"--timing", "--strict"}
+	cmdArgs := p.appendIncludeArgs(nil)
+	cmdArgs = append(cmdArgs, "--timing", "--strict")
 	cmdArgs = args.Target.appendCommandArgs(cmdArgs)
 	switch args.FPModes {
 	case FPNo:

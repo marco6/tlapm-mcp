@@ -202,6 +202,25 @@ func TestBuildProveCmdUsesTLAPMDefaults(t *testing.T) {
 	}
 }
 
+func TestBuildProveCmdIncludesLibraryDirs(t *testing.T) {
+	p := &Prover{IncludeDirs: []string{"/libs/core", "testcases"}}
+	cmd, err := p.buildProveCmd(context.Background(), ProveArgs{
+		Module:  "Spec.tla",
+		Target:  LineTarget{Range: &LineRange{Start: 6, End: 8}},
+		FPModes: FPNo,
+	})
+	if err != nil {
+		t.Fatalf("buildProveCmd() error = %v", err)
+	}
+	want := []string{
+		"-I", "/libs/core", "-I", "testcases",
+		"--timing", "--strict", "--toolbox", "6", "8", "--nofp", "Spec.tla",
+	}
+	if !reflect.DeepEqual(cmd.Args[1:], want) {
+		t.Fatalf("prove args = %v, want %v", cmd.Args[1:], want)
+	}
+}
+
 func TestProve_WithoutFingerprints(t *testing.T) {
 	ctx := context.Background()
 	p := NewWithFS(testdataFS)
