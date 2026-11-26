@@ -11,20 +11,28 @@ import (
 
 func TestBuildCheckCmd(t *testing.T) {
 	tests := []struct {
-		name string
-		args CheckArgs
-		want []string
+		name        string
+		args        CheckArgs
+		includeDirs []string
+		want        []string
 	}{
 		{
 			name: "whole module",
 			args: CheckArgs{Module: "Spec.tla"},
 			want: []string{"--summary", "-N", "Spec.tla"},
 		},
+		{
+			name:        "library directories",
+			args:        CheckArgs{Module: "Spec.tla"},
+			includeDirs: []string{"/libs/core", "testcases"},
+			want:        []string{"-I", "/libs/core", "-I", "testcases", "--summary", "-N", "Spec.tla"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd := buildCheckCmd(context.Background(), tt.args)
+			p := &Prover{IncludeDirs: tt.includeDirs}
+			cmd := p.buildCheckCmd(context.Background(), tt.args)
 			if got := cmd.Args[1:]; !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("check command args = %v, want %v", got, tt.want)
 			}

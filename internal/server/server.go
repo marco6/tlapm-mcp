@@ -34,9 +34,8 @@ func (s *Server) Run(ctx context.Context) error {
 	return s.mcpServer.Run(ctx, &mcp.StdioTransport{})
 }
 
-// Start creates a server, registers tools, and runs it.
-func Start() {
-	p := prover.New()
+// Start registers tools on the given prover and runs the server.
+func Start(p *prover.Prover) {
 	srv := New(p)
 	srv.RegisterTools()
 	if err := srv.Run(context.Background()); err != nil {

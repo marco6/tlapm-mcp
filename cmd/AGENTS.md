@@ -12,5 +12,5 @@ The `cmd/` directory contains the main binary entry point for the `tlapm-mcp` ap
 
 # Directory
 
-- `tlapm-mcp/main.go` - Thin application bootstrap that delegates to `server.Start()`.
+- `tlapm-mcp/main.go` - Thin application bootstrap that parses the repeatable `-I DIR` library-search-path flag, builds the prover, and delegates to `server.Start()`.
 

@@ -27,6 +27,24 @@ Register it with an MCP client. For example, in OpenCode's `.opencode/config.jso
 
 Replace both paths with the repository location. Then ask the client: “Prove lines 6 through 8 of `testcases/arithmetic_theorem.tla`.” The server should report that 1 obligation was proved. See [MCP Tools](#mcp-tools) for request fields and response details.
 
+### Library paths
+
+Pass `-I DIR` to add a directory to tlapm's module search path. The flag is repeatable, and every directory is added to both `check` and `prove` invocations:
+
+```jsonc
+{
+  "mcpServers": {
+    "tlapm": {
+      "command": "/absolute/path/to/tlapm-mcp/tlapm-mcp",
+      "cwd": "/absolute/path/to/tlapm-mcp",
+      "args": ["-I", "/path/to/tlaps-library", "-I", "/path/to/CommunityModules"]
+    }
+  }
+}
+```
+
+Relative directories resolve against the server's `cwd`. Values are passed to tlapm verbatim, so tlapm's `-I +subdir` form (relative to the TLAPS standard library) also works.
+
 ## MCP Tools
 
 ### `check`
